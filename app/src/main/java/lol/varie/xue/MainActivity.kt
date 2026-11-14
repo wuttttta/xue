@@ -77,21 +77,40 @@ class MainActivity : Activity() {
 
         col.addView(heading("Look up"))
         col.addView(text(
-            "Tap the floating 学 button, then a character: its card from the quiz opens over the app. " +
-                "A tap anywhere else, or on the button again, goes back to normal. Drag the button to move it.", 14f
+            "Pull down Quick Settings and tap \"学 look\", then tap a character: its card from the quiz opens over the app. " +
+                "A tap anywhere else goes back to normal.", 14f
         ))
+        if (Build.VERSION.SDK_INT >= 33) {
+            col.addView(button("Add the 学 look tile") {
+                val sbm = getSystemService(android.app.StatusBarManager::class.java)
+                sbm.requestAddTileService(
+                    android.content.ComponentName(this, LookTile::class.java), "学 look",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_tile), mainExecutor,
+                ) { }
+            })
+        } else {
+            col.addView(text("To add it: open Quick Settings, edit the tiles and drag \"学 look\" in.", 13f, muted()))
+        }
         col.addView(text(
             "The panel's quiz keeps its own sign-in: paste the quiz's \"Edit list\" link under Your list to use your list there.",
             13f, muted()
         ))
 
         col.addView(Switch(this).apply {
-            text = "Show marks and the 学 button"
+            text = "Show marks"
             textSize = 16f
             setTextColor(fg())
             isChecked = prefs.getBoolean(Prefs.SHOW, true)
             setPadding(0, (12 * dp).toInt(), 0, (4 * dp).toInt())
             setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.SHOW, on).apply() }
+        })
+        col.addView(Switch(this).apply {
+            text = "Floating 学 button for look up"
+            textSize = 16f
+            setTextColor(fg())
+            isChecked = prefs.getBoolean(Prefs.BUTTON, false)
+            setPadding(0, (8 * dp).toInt(), 0, (4 * dp).toInt())
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.BUTTON, on).apply() }
         })
 
         col.addView(heading("Your list"))

@@ -47,7 +47,8 @@ class XueService : AccessibilityService() {
     private var layerParams: WindowManager.LayoutParams? = null
     private var button: LookButton? = null
     private var buttonParams: WindowManager.LayoutParams? = null
-    private var looking = false
+    @Volatile private var looking = false
+    val isLooking: Boolean get() = looking
     private lateinit var prefs: SharedPreferences
     @Volatile private var show = true
 
@@ -58,14 +59,11 @@ class XueService : AccessibilityService() {
         when (key) {
             Prefs.SHOW -> {
                 show = p.getBoolean(Prefs.SHOW, true)
-                main.post {
-                    button?.visibility = if (show) View.VISIBLE else View.GONE
-                    if (!show) {
-                        setLooking(false)
-                        layer?.setMarks(emptyList())
-                    }
-                }
-                if (show) requestScan()
+                if (show) requestScan() else main.post { if (!looking) layer?.setMarks(emptyList()) }
+            }
+            Prefs.BUTTON -> main.post {
+                button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
+            }
             }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
@@ -131,7 +129,7 @@ class XueService : AccessibilityService() {
         lp.gravity = Gravity.TOP or Gravity.START
         lp.x = prefs.getInt(Prefs.BTN_X, dm.widthPixels - b.sizePx - (8 * dm.density).toInt())
         lp.y = prefs.getInt(Prefs.BTN_Y, (dm.heightPixels * 0.62f).toInt())
-        b.visibility = if (show) View.VISIBLE else View.GONE
+        b.visibility = if (prefs.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
         w.addView(b, lp)
         button = b
         buttonParams = lp
@@ -158,6 +156,14 @@ class XueService : AccessibilityService() {
             runCatching { wm?.updateViewLayout(it, lp) }
         }
         button?.looking = on
+        if (on) requestScan() else if (!show) layer?.setMarks(emptyList())
+        LookTile.refresh(this)
+    }
+
+    /** From the Quick Settings tile: look mode on, and the shade out of the way so the screen can be tapped. */
+    fun lookFromTile() = main.post {
+        setLooking(true)
+        if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
     }
 
     /** A tap in look mode: on a character, open its panel; anywhere else, leave look mode. */
@@ -173,7 +179,7 @@ class XueService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (show) requestScan()
+        if (show || looking) requestScan()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -220,7 +226,8 @@ class XueService : AccessibilityService() {
     private fun scan() {
         scanQueued = false
         lastScan = SystemClock.uptimeMillis()
-        if (!show) return
+        // With marks off, look mode still shows them while it lasts, so there is something to tap.
+        if (!show && !looking) return
         if (!Freq.loaded) Freq.load(this)
         val marks = try {
             collect()
@@ -228,7 +235,7 @@ class XueService : AccessibilityService() {
             // Nodes can vanish mid-scan; the next event brings a new one.
             return
         }
-        main.post { if (show) layer?.setMarks(marks) }
+        main.post { if (show || looking) layer?.setMarks(marks) }
     }
 
     private class Scan(val dark: Boolean, val covered: Region, val win: Rect) {

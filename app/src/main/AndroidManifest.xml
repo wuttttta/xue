@@ -30,6 +30,20 @@
             android:windowSoftInputMode="adjustResize" />
 
         <service
+            android:name=".LookTile"
+            android:exported="true"
+            android:label="学 look"
+            android:icon="@drawable/ic_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
+        <service
             android:name=".XueService"
             android:exported="false"
             android:label="@string/service_label"

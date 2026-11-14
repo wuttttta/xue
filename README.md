@@ -5,7 +5,7 @@ your list get your level's colour from the quiz at [varie.lol/h](https://varie.l
 yellow … L5 dark red, by how often you get them wrong); every other character gets a blue by how common it is
 (ƒ, F1 commonest … F5 rarest). Same colours as the quiz.
 
-Tap the floating 学 button, then any marked character: the quiz's card for it opens in a sheet over the app.
+Tap the **学 look** Quick Settings tile, then any character: the quiz's card for it opens in a sheet over the app.
 
 Status: steps 1–3 of the plan (marks by frequency, your levels, look mode with the panel). Next: OCR for text
 in images.
@@ -28,8 +28,8 @@ in images.
    per-character boxes.
 
 The marks never take a touch: everything under them works as usual. Only in look mode (after a tap on the
-floating 学 button) does the next tap go to 学: on a character it opens the panel, anywhere else it ends look mode. Turn them and the button off with the
-**Show marks** switch, or turn the service off in Accessibility.
+**学 look** tile, or on the optional floating 学 button) does the next tap go to 学: on a character it opens the
+panel, anywhere else it ends look mode. Add the tile from 学's settings (Android 13+) or by editing Quick Settings. Turn them off with the **Show marks** switch (look mode still works, showing them while it lasts), or turn the service off in Accessibility.
 
 Sideload only: Google Play restricts accessibility services outside disability tools.
 

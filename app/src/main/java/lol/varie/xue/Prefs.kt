@@ -4,11 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 
 object Prefs {
-    /** Marks on or off (the service stays enabled). */
+    /** Marks on or off (the service stays enabled; look mode still works). */
     const val SHOW = "show"
     /** The user's list code on paste.varie.lol (read-only; never a token). */
     const val LIST_CODE = "list_code"
     const val SYNCED_AT = "synced_at"
+    /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
+    const val BUTTON = "button"
     /** Where the floating look button was left. */
     const val BTN_X = "btn_x"
     const val BTN_Y = "btn_y"
