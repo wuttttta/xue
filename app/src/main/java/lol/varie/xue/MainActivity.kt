@@ -87,26 +87,26 @@ class MainActivity : Activity() {
                 setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.TAP, on).apply() }
             })
             col.addView(text(
-                "A plain tap on a character opens its card; scrolling, typing, links and buttons go to the app as usual. " +
-                    "To do it 学 handles touch first, like TalkBack, so some apps may act as if a screen reader were on. " +
-                    "If touches ever stop working, it turns itself off.", 13f, muted()
+                "A plain tap on a character opens its card; everything else (scrolling, typing, links, buttons) goes " +
+                    "to the app as usual. It uses Android's touch exploration, like TalkBack, so some apps may act as " +
+                    "if a screen reader were on. The \"学 tap\" Quick Settings tile turns it on and off.", 13f, muted()
             ))
             tapStatus = text("", 13f).also { col.addView(it) }
-            col.addView(text("Or, without tap mode:", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
-        }
-        col.addView(text(
-            "Pull down Quick Settings and tap \"学 look\", then tap a character: its card from the quiz opens over the app. " +
-                "A tap anywhere else goes back to normal.", 14f
-        ))
-        if (Build.VERSION.SDK_INT >= 33) {
-            col.addView(button("Add the 学 look tile") {
+            col.addView(button("Add the ${LookTile.label} tile") {
                 val sbm = getSystemService(android.app.StatusBarManager::class.java)
                 sbm.requestAddTileService(
-                    android.content.ComponentName(this, LookTile::class.java), "学 look",
+                    android.content.ComponentName(this, LookTile::class.java), LookTile.label,
                     android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_tile), mainExecutor,
                 ) { }
             })
+            col.addView(text(
+                "Without tap mode: turn on the floating 学 button below, tap it, then tap a character.", 13f, muted()
+            ).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
         } else {
+            col.addView(text(
+                "Pull down Quick Settings and tap \"学 look\", then tap a character: its card from the quiz opens over " +
+                    "the app. A tap anywhere else goes back to normal.", 14f
+            ))
             col.addView(text("To add it: open Quick Settings, edit the tiles and drag \"学 look\" in.", 13f, muted()))
         }
         col.addView(text(
@@ -151,9 +151,9 @@ class MainActivity : Activity() {
         col.addView(mine)
 
         col.addView(heading("Colours"))
-        col.addView(text("Yours: your level, how often you get it wrong", 13f, muted()))
-        col.addView(Legend(this, dark, listOf("New", "L1", "L2", "L3", "L4", "L5"), null) { Palette.level(it, dark) })
-        col.addView(text("Every other character: ƒ, how common", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
+        col.addView(text("Highlight, on your characters: your level, how often you get it wrong", 13f, muted()))
+        col.addView(Legend(this, dark, listOf("New", "L1", "L2", "L3", "L4", "L5"), null, highlight = true) { Palette.level(it, dark) })
+        col.addView(text("Underline, on every character: ƒ, how common", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
         col.addView(Legend(this, dark, listOf("F1", "F2", "F3", "F4", "F5"), listOf("的", "们", "习", "璀", "璨")) {
             Palette.freq(it + 1, dark)
         })
@@ -308,6 +308,7 @@ class MainActivity : Activity() {
         dark: Boolean,
         private val labels: List<String>,
         private val samples: List<String>?,
+        private val highlight: Boolean = false,
         private val colorOf: (Int) -> Int,
     ) : View(context) {
         private val dp = resources.displayMetrics.density
@@ -326,10 +327,11 @@ class MainActivity : Activity() {
             strokeCap = Paint.Cap.ROUND
             strokeWidth = 3 * dp
         }
-        private val lineY = (if (samples != null) 38 else 8) * dp
+        private val box = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val lineY = (if (samples != null) 38 else 12) * dp
 
         init {
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, ((if (samples != null) 64 else 36) * dp).toInt())
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, ((if (samples != null) 64 else 40) * dp).toInt())
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -338,9 +340,15 @@ class MainActivity : Activity() {
             for (i in 0 until n) {
                 val cx = cell * i + cell / 2
                 samples?.let { canvas.drawText(it[i], cx, 30 * dp, glyph) }
-                line.color = colorOf(i)
-                line.alpha = 220
-                canvas.drawLine(cx - 10 * dp, lineY, cx + 10 * dp, lineY, line)
+                if (highlight) {
+                    box.color = colorOf(i)
+                    box.alpha = 96
+                    canvas.drawRoundRect(cx - 11 * dp, lineY - 8 * dp, cx + 11 * dp, lineY + 4 * dp, 3 * dp, 3 * dp, box)
+                } else {
+                    line.color = colorOf(i)
+                    line.alpha = 220
+                    canvas.drawLine(cx - 10 * dp, lineY, cx + 10 * dp, lineY, line)
+                }
                 canvas.drawText(labels[i], cx, lineY + 20 * dp, label)
             }
         }

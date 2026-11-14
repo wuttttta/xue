@@ -1,18 +1,19 @@
 # 学 (xue)
 
-An Android app that marks the Chinese characters on screen, in any app, with a light underline. Characters in
-your list get your level's colour from the quiz at [varie.lol/h](https://varie.lol/h/) (warm: New grey, L1
-yellow … L5 dark red, by how often you get them wrong); every other character gets a blue by how common it is
-(ƒ, F1 commonest … F5 rarest). Same colours as the quiz.
+An Android app that marks the Chinese characters on screen, in any app. Every character gets a light underline
+in a blue by how common it is (ƒ, F1 commonest … F5 rarest); characters in your list also get a soft highlight
+in your level's colour from the quiz at [varie.lol/h](https://varie.lol/h/) (New grey, L1 yellow … L5 dark red,
+by how often you get them wrong). Same colours as the quiz.
 
 With **tap mode** on (Android 13+, experimental), a plain tap on any character opens the quiz's card for it in
 a sheet over the app, like Lens. Without it: tap the **学 look** Quick Settings tile, then the character.
 
-Tap mode works the way Android allows: 学 asks for touch exploration (as screen readers do) and handles each touch
-first through a `TouchInteractionController`. A touch that doesn't start on a character, or starts on a link or
-button, goes straight back to the app; one that starts on a character is kept only if it is a quick tap without
-moving. If handing touches back ever fails, tap mode turns itself off. Some apps change behaviour when touch
-exploration is on (they think a screen reader is running).
+Tap mode works the way Android allows: 学 asks for touch exploration (as screen readers do) and takes touches
+through a `TouchInteractionController`. The whole screen except the characters is a touch-exploration
+passthrough region, so Android hands those touches straight to the app; characters in links and buttons stay in
+it too. A touch that starts on a character comes to 学: a quick tap opens the panel, anything else (moving,
+holding, a second finger) is handed back while the finger is still down. The **学 tap** Quick Settings tile turns
+it on and off. Some apps change behaviour when touch exploration is on (they think a screen reader is running).
 
 Status: steps 1–3 of the plan (marks by frequency, your levels, look mode with the panel). Next: OCR for text
 in images.

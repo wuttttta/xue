@@ -2,26 +2,28 @@ package lol.varie.xue
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.TouchInteractionController
+import android.annotation.TargetApi
+import android.graphics.Rect
+import android.graphics.Region
 import android.os.Handler
-import android.os.SystemClock
 import android.view.Display
 import android.view.MotionEvent
 import android.view.ViewConfiguration
-import android.annotation.TargetApi
+import android.view.WindowManager
 import kotlin.math.abs
 
 /**
  * Tap mode (Android 13+, experimental): a plain tap on a character opens its panel, like Lens.
  *
  * Android gives no way to watch taps in other apps and still let them through, so the service asks for touch
- * exploration and handles touches itself through a TouchInteractionController. Every touch that does not start
- * on a character is handed back to the app at once (requestDelegating, on the first event); one that starts on a
- * character is held until it is clearly a tap (lifted quickly, without moving) or not (moved, held, a second
- * finger), and then handed back too. Links and buttons keep working: a character in a clickable element
- * is never held.
+ * exploration and takes touches through a TouchInteractionController. To keep that out of the way:
  *
- * Safety: if handing back fails three times (events keep coming after requestDelegating), tap mode turns itself
- * off, so a bug can't leave the screen unusable.
+ * - The whole screen except the characters is a **passthrough region** (setTouchExplorationPassthroughRegion):
+ *   Android hands those touches straight to the app itself, without asking 学. Characters in links and buttons
+ *   stay in the region, so their taps keep working too.
+ * - A touch that starts on a character comes to 学. A quick tap without moving opens the panel. Anything else
+ *   (moving, holding, a second finger, a scroll still going) is handed back while the finger is still down
+ *   (requestDelegating), so the app sees the scroll or the long press, only slightly late.
  */
 @TargetApi(33)
 class TapMode(
@@ -35,16 +37,18 @@ class TapMode(
     private val onGiveUp: (String) -> Unit,
 ) {
     private val slop = ViewConfiguration.get(service).scaledTouchSlop
+    private val density = service.resources.displayMetrics.density
     private var ctl: TouchInteractionController? = null
     private var held: Mark? = null
+    private var down = false
     private var downX = 0f
     private var downY = 0f
-    private var delegatedAt = -1L
-    private var delegatedDown = -1L
     private var failures = 0
+    private var looking = false
+    private var marks: List<Mark> = emptyList()
     var active = false; private set
 
-    private val holdTooLong = Runnable { if (held != null) { held = null; delegate() } }
+    private val holdTooLong = Runnable { if (held != null && down) { held = null; delegate() } }
 
     private val callback = object : TouchInteractionController.Callback {
         override fun onMotionEvent(e: MotionEvent) {
@@ -52,13 +56,14 @@ class TapMode(
                 handle(e)
             } catch (t: Throwable) {
                 held = null
-                delegate()
+                if (down) delegate()
             }
         }
 
         override fun onStateChanged(state: Int) {
             if (state == TouchInteractionController.STATE_CLEAR) {
                 held = null
+                down = false
                 main.removeCallbacks(holdTooLong)
             }
         }
@@ -67,6 +72,8 @@ class TapMode(
     fun start(): Boolean {
         if (active) return true
         val info = service.serviceInfo ?: return false
+        // Everything passes through until the first scan says where the characters are.
+        passAll()
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
         service.serviceInfo = info
         return try {
@@ -75,6 +82,7 @@ class TapMode(
             ctl = c
             active = true
             failures = 0
+            updateRegion()
             true
         } catch (t: Throwable) {
             stop()
@@ -85,31 +93,58 @@ class TapMode(
     fun stop() {
         main.removeCallbacks(holdTooLong)
         held = null
+        down = false
         runCatching { ctl?.unregisterAllCallbacks() }
         ctl = null
         active = false
         val info = service.serviceInfo ?: return
         info.flags = info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
         runCatching { service.serviceInfo = info }
+        runCatching { service.setTouchExplorationPassthroughRegion(Display.DEFAULT_DISPLAY, Region()) }
+    }
+
+    /** New marks from a scan: only their boxes are kept out of the passthrough region. */
+    fun setMarks(list: List<Mark>) {
+        marks = list
+        updateRegion()
+    }
+
+    /** In look mode the layer takes the taps itself: let everything through to it. */
+    fun setLooking(on: Boolean) {
+        looking = on
+        updateRegion()
+    }
+
+    private fun screen(): Rect = service.getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
+
+    private fun passAll() {
+        runCatching { service.setTouchExplorationPassthroughRegion(Display.DEFAULT_DISPLAY, Region(screen())) }
+    }
+
+    private fun updateRegion() {
+        if (!active) return
+        if (looking) return passAll()
+        val r = Region(screen())
+        val pad = (3 * density).toInt()
+        val box = Rect()
+        for (m in marks) {
+            if (m.clickable) continue
+            box.set(m.left.toInt() - pad, m.top.toInt() - pad, m.right.toInt() + pad, m.bottom.toInt() + pad)
+            r.op(box, Region.Op.DIFFERENCE)
+        }
+        runCatching { service.setTouchExplorationPassthroughRegion(Display.DEFAULT_DISPLAY, r) }
     }
 
     private fun handle(e: MotionEvent) {
-        // Still getting this touch well after handing it back: the hand-back failed.
-        if (e.downTime == delegatedDown && SystemClock.uptimeMillis() - delegatedAt > 300) {
-            delegatedDown = -1
-            if (++failures >= 3) {
-                stop()
-                onGiveUp("Tap mode turned itself off: Android didn't pass touches on to the app.")
-                return
-            }
-        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 main.removeCallbacks(holdTooLong)
+                down = true
                 val m = if (scrolling()) null else markAt(e.x, e.y)
                 if (m == null || m.clickable) {
+                    // Not on a character after all (the screen moved since the last scan): give it back now.
                     held = null
-                    delegate(e.downTime)
+                    delegate()
                     return
                 }
                 held = m
@@ -121,15 +156,16 @@ class TapMode(
             MotionEvent.ACTION_MOVE -> if (held != null && (abs(e.x - downX) > slop || abs(e.y - downY) > slop)) {
                 held = null
                 main.removeCallbacks(holdTooLong)
-                delegate(e.downTime)
+                delegate()
             }
             MotionEvent.ACTION_POINTER_DOWN -> if (held != null) {
                 held = null
                 main.removeCallbacks(holdTooLong)
-                delegate(e.downTime)
+                delegate()
             }
             MotionEvent.ACTION_UP -> {
                 main.removeCallbacks(holdTooLong)
+                down = false
                 val m = held
                 held = null
                 if (m != null) {
@@ -140,18 +176,18 @@ class TapMode(
             MotionEvent.ACTION_CANCEL -> {
                 main.removeCallbacks(holdTooLong)
                 held = null
+                down = false
             }
         }
     }
 
-    private fun delegate(downTime: Long = -1) {
+    /** Hands the current touch back to the app. Only while a finger is down: after it lifts there is nothing to hand. */
+    private fun delegate() {
         val c = ctl ?: return
-        delegatedAt = SystemClock.uptimeMillis()
-        delegatedDown = downTime
         try {
             c.requestDelegating()
         } catch (t: Throwable) {
-            if (++failures >= 3) {
+            if (++failures >= 5) {
                 stop()
                 onGiveUp("Tap mode turned itself off: ${t.message ?: t.javaClass.simpleName}")
             }

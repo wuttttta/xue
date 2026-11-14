@@ -164,6 +164,7 @@ class XueService : AccessibilityService() {
             runCatching { wm?.updateViewLayout(it, lp) }
         }
         button?.looking = on
+        if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(on)
         requestScan()
         LookTile.refresh(this)
     }
@@ -271,7 +272,10 @@ class XueService : AccessibilityService() {
             // Nodes can vanish mid-scan; the next event brings a new one.
             return
         }
-        main.post { layer?.setMarks(marks) }
+        main.post {
+            layer?.setMarks(marks)
+            if (Build.VERSION.SDK_INT >= 33) tap?.setMarks(marks)
+        }
     }
 
     private class Scan(val dark: Boolean, val covered: Region, val win: Rect) {
@@ -298,7 +302,7 @@ class XueService : AccessibilityService() {
                 if (root != null && root.packageName != packageName) {
                     val t0 = SystemClock.uptimeMillis()
                     val s = Scan(dark, covered, wb)
-                    walk(root, 0, false, s)
+                    walk(root, 0, 99, s)
                     all.addAll(s.out)
                     Stats.record(
                         root.packageName?.toString() ?: "?",
@@ -311,16 +315,20 @@ class XueService : AccessibilityService() {
         return all
     }
 
-    /** [parentClickable]: the parent is a link or button; with the node's own flag it makes its text "clickable". */
-    private fun walk(node: AccessibilityNodeInfo, depth: Int, parentClickable: Boolean, s: Scan) {
+    /**
+     * [sinceClickable]: how many levels up the nearest clickable ancestor is (1 = the parent). Text in a clickable
+     * node, or under one at most 3 levels up, belongs to a link or button: tap mode leaves its taps to the app.
+     */
+    private fun walk(node: AccessibilityNodeInfo, depth: Int, sinceClickable: Int, s: Scan) {
         if (depth > MAX_DEPTH || s.nodes >= MAX_NODES) return
         s.nodes++
         if (!node.isVisibleToUser) return
         val text = node.text
-        if (!text.isNullOrEmpty()) markText(node, text.toString(), parentClickable || node.isClickable, s)
+        if (!text.isNullOrEmpty()) markText(node, text.toString(), node.isClickable || sinceClickable <= 3, s)
+        val next = if (node.isClickable) 1 else sinceClickable + 1
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            walk(child, depth + 1, node.isClickable, s)
+            walk(child, depth + 1, next, s)
         }
     }
 
@@ -371,10 +379,14 @@ class XueService : AccessibilityService() {
             val key = (r.left.toInt().toLong() shl 32) or (r.top.toInt().toLong() and 0xffffffffL)
             if (!s.seen.add(key)) continue
             s.chars++
-            // Yours in your level's colour (warm), every other character by ƒ (blue).
+            // Underline by ƒ for every character; highlight by your level for yours.
             val mine = Mine.level(cp)
-            val color = if (mine >= 0) Palette.level(mine, s.dark) else Palette.freq(Freq.level(cp), s.dark)
-            s.out.add(Mark(r.left, r.top, r.right, r.bottom, cp, color, clickable))
+            s.out.add(Mark(
+                r.left, r.top, r.right, r.bottom, cp,
+                under = Palette.freq(Freq.level(cp), s.dark),
+                high = if (mine >= 0) Palette.level(mine, s.dark) else null,
+                clickable = clickable,
+            ))
         }
     }
 }

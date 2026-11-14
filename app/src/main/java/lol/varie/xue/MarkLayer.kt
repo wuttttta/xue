@@ -9,12 +9,15 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * One character on screen: its box in screen coordinates, the character and its colour.
- * [clickable]: it is part of a link or button (its node or the node's parent is clickable), so a tap belongs to the app.
+ * One character on screen: its box in screen coordinates and the character.
+ * [under]: the underline's colour, by frequency (ƒ). [high]: the highlight's colour, by your level, for your
+ * characters only (null for the rest).
+ * [clickable]: it is part of a link or button (it or one of its 3 nearest ancestors is clickable), so a tap
+ * belongs to the app.
  */
 class Mark(
     val left: Float, val top: Float, val right: Float, val bottom: Float,
-    val cp: Int, val color: Int, val clickable: Boolean,
+    val cp: Int, val under: Int, val high: Int?, val clickable: Boolean,
 )
 
 /**
@@ -70,16 +73,25 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
             val w = m.right - m.left
             val h = m.bottom - m.top
             if (w <= 0f || h <= 0f) continue
-            if (looking) {
-                fill.color = m.color
-                fill.alpha = 56
+            // Your characters: a soft highlight in your level's colour, like a highlighter pen.
+            if (m.high != null) {
+                fill.color = m.high
+                fill.alpha = 96
                 canvas.drawRoundRect(m.left, m.top, m.right, m.bottom, 3 * density, 3 * density, fill)
             }
             val stroke = (h * 0.09f).coerceIn(1.5f * density, 3.5f * density)
+            // Look mode: a thin outline too, to show what can be tapped.
+            if (looking) {
+                paint.strokeWidth = 1 * density
+                paint.color = m.under
+                paint.alpha = 160
+                canvas.drawRoundRect(m.left, m.top, m.right, m.bottom, 3 * density, 3 * density, paint)
+            }
+            // Every character: an underline by frequency.
             val inset = (w * 0.12f).coerceAtLeast(stroke / 2)
             val y = m.bottom + stroke * 0.2f
             paint.strokeWidth = stroke
-            paint.color = m.color
+            paint.color = m.under
             paint.alpha = 220
             canvas.drawLine(m.left + inset, y, m.right - inset, y, paint)
         }
