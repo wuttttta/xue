@@ -110,10 +110,33 @@ class MainActivity : Activity() {
             ))
             col.addView(text("To add it: open Quick Settings, edit the tiles and drag \"学 look\" in.", 13f, muted()))
         }
+        col.addView(Switch(this).apply {
+            text = "Quiz me instead of showing the card"
+            textSize = 16f
+            setTextColor(fg())
+            isChecked = prefs.getBoolean(Prefs.QUIZ, false)
+            setPadding(0, (12 * dp).toInt(), 0, (4 * dp).toInt())
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.QUIZ, on).apply() }
+        })
         col.addView(text(
-            "The panel's quiz keeps its own sign-in: paste the quiz's \"Edit list\" link under Your list to use your list there.",
-            13f, muted()
+            "Off: a tapped character opens its card (meaning, your date and error rate, frequency). " +
+                "On: the quiz asks it as a question.", 13f, muted()
         ))
+
+        col.addView(heading("Read a sentence"))
+        col.addView(text(
+            "\"Select area\" in 学's notification, or the \"学 select\" Quick Settings tile: drag a box over some text " +
+                "(or a picture of it) and the quiz opens it, split into words, as when you share text to it. " +
+                "While you drag, the screen takes no other touches; a tap cancels.", 14f
+        ))
+        if (Build.VERSION.SDK_INT >= 33) {
+            col.addView(button("Add the 学 select tile") {
+                getSystemService(android.app.StatusBarManager::class.java).requestAddTileService(
+                    android.content.ComponentName(this, SelectTile::class.java), "学 select",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_select), mainExecutor,
+                ) { }
+            })
+        }
 
         if (Build.VERSION.SDK_INT >= 30) {
             col.addView(heading("Images and video (OCR)"))
@@ -204,11 +227,22 @@ class MainActivity : Activity() {
         ).apply { setPadding(0, (24 * dp).toInt(), 0, 0) })
 
         setContentView(ScrollView(this).apply { addView(col) })
+        // The 学 sign in the status bar (and its buttons) is a notification: Android 13+ asks for it once.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         Thread {
             if (!Freq.loaded) Freq.load(applicationContext)
             Mine.load(applicationContext)
             ui.post { refresh() }
         }.start()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        XueService.running?.let { StatusNote.show(it) }
     }
 
     override fun onResume() {
@@ -252,7 +286,7 @@ class MainActivity : Activity() {
 
         val code = Mine.code(this)
         mine.text = when {
-            code == null -> "Not set. In the quiz: person icon → account → share \"Edit list\" and paste that link here (it also signs the panel's quiz in to your list). \"Raw text\" or \"Word list\" work too, for the colours only."
+            code == null -> "Not set. In the quiz: person icon → account → share \"Edit list\" and paste that link here (it also signs the panel's quiz in to your list). \"Raw text\" or \"Word list\" work too (then the panel shows your data but can't add words)."
             Mine.syncedAt == 0L -> Mine.error?.let { "$code: $it" } ?: "$code: not synced yet"
             else -> buildString {
                 append("$code: ${Mine.words} words")

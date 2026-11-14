@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 
@@ -44,6 +45,30 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
             invalidate()
         }
 
+    /**
+     * Select mode: the layer takes touches, a drag draws a box, and lifting the finger calls [onArea] with it
+     * (screen coordinates; null when it was only a tap, which cancels).
+     */
+    var onArea: ((RectF?) -> Unit)? = null
+        set(v) {
+            field = v
+            box = null
+            invalidate()
+        }
+    private var box: RectF? = null
+    private var boxX = 0f
+    private var boxY = 0f
+    private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val hint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        textSize = 16 * resources.displayMetrics.scaledDensity
+        setShadowLayer(4 * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
+    }
+
+    /** The marks now on screen (for select mode: the characters inside the box). */
+    fun current(): List<Mark> = marks
+
     /** Whether the marks are drawn; they are kept for tap mode either way. */
     var drawMarks = true
         set(v) {
@@ -63,6 +88,24 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (onArea != null) {
+            canvas.drawColor(Color.argb(70, 0, 0, 0))
+            val b = box
+            getLocationOnScreen(loc)
+            if (b == null) {
+                canvas.drawText("Drag over the text to read", width / 2f, height * 0.18f, hint)
+            } else {
+                val r = RectF(b)
+                r.offset(-loc[0].toFloat(), -loc[1].toFloat())
+                boxPaint.style = Paint.Style.FILL
+                boxPaint.color = Color.argb(40, 255, 255, 255)
+                canvas.drawRoundRect(r, 6 * density, 6 * density, boxPaint)
+                boxPaint.style = Paint.Style.STROKE
+                boxPaint.strokeWidth = 2 * density
+                boxPaint.color = Color.WHITE
+                canvas.drawRoundRect(r, 6 * density, 6 * density, boxPaint)
+            }
+        }
         if (looking) canvas.drawColor(Color.argb(28, 0, 0, 0))
         if (marks.isEmpty() || !(drawMarks || looking)) return
         // Marks are in screen coordinates; the layer may not start at the screen's top left.
@@ -100,6 +143,26 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        onArea?.let { done ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    boxX = e.rawX
+                    boxY = e.rawY
+                    box = null
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    box = RectF(minOf(boxX, e.rawX), minOf(boxY, e.rawY), maxOf(boxX, e.rawX), maxOf(boxY, e.rawY))
+                    invalidate()
+                }
+                MotionEvent.ACTION_UP -> {
+                    val b = box
+                    box = null
+                    done(if (b != null && b.width() > 16 * density && b.height() > 12 * density) b else null)
+                }
+                MotionEvent.ACTION_CANCEL -> done(null)
+            }
+            return true
+        }
         if (!looking) return false
         if (e.actionMasked == MotionEvent.ACTION_UP) onPick(hit(e.rawX, e.rawY))
         return true

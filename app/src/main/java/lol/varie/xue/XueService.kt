@@ -52,6 +52,7 @@ class XueService : AccessibilityService() {
     @Volatile private var tapOn = false
     @Volatile private var lastScrollAt = 0L
     private var ocr: OcrMode? = null
+    private var selecting = false
     /** Marks from the accessibility text, and from OCR; drawn together. */
     private var textMarks: List<Mark> = emptyList()
     private var ocrMarks: List<Mark> = emptyList()
@@ -70,14 +71,15 @@ class XueService : AccessibilityService() {
         when (key) {
             Prefs.SHOW -> {
                 show = p.getBoolean(Prefs.SHOW, true)
-                main.post { layer?.drawMarks = show }
+                main.post { layer?.drawMarks = show; StatusNote.show(this) }
                 requestScan()
             }
             Prefs.BUTTON -> main.post {
                 button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
             }
-            Prefs.TAP -> main.post { applyTapMode() }
-            Prefs.OCR -> main.post { applyOcr() }
+            Prefs.TAP -> main.post { applyTapMode(); StatusNote.show(this) }
+            Prefs.OCR -> main.post { applyOcr(); StatusNote.show(this) }
+            Prefs.QUIZ -> main.post { StatusNote.show(this) }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
@@ -93,6 +95,7 @@ class XueService : AccessibilityService() {
         layer?.drawMarks = show
         applyTapMode()
         applyOcr()
+        StatusNote.show(this)
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
             Mine.load(this)
@@ -164,17 +167,76 @@ class XueService : AccessibilityService() {
     private fun setLooking(on: Boolean) {
         if (looking == on) return
         looking = on
+        layer?.looking = on
+        layerTakesTouches(on || selecting)
+        button?.looking = on
+        requestScan()
+        LookTile.refresh(this)
+    }
+
+    /** The layer takes touches (look and select modes) or lets them all through. */
+    private fun layerTakesTouches(on: Boolean) {
         val lp = layerParams ?: return
         lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         else lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        layer?.let {
-            it.looking = on
-            runCatching { wm?.updateViewLayout(it, lp) }
-        }
-        button?.looking = on
+        layer?.let { runCatching { wm?.updateViewLayout(it, lp) } }
+        // Tap mode lets everything through to the layer meanwhile.
         if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(on)
-        requestScan()
-        LookTile.refresh(this)
+    }
+
+    /**
+     * Select mode (from the notification or the "学 select" tile): the shade closes, the screen dims, and a box
+     * dragged over text is read and opened in the quiz like text shared to it. Ends after one box, or a tap.
+     */
+    fun startSelect() = main.post {
+        if (selecting) return@post
+        setLooking(false)
+        selecting = true
+        if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        layerTakesTouches(true)
+        layer?.onArea = { area ->
+            selecting = false
+            layer?.onArea = null
+            layerTakesTouches(looking)
+            if (area != null) readArea(area)
+        }
+    }
+
+    /** The text in a box: the characters marked there (exact), or else read from the pixels (OCR). */
+    private fun readArea(area: android.graphics.RectF) {
+        val inside = (layer?.current() ?: emptyList()).filter {
+            area.contains((it.left + it.right) / 2, (it.top + it.bottom) / 2)
+        }
+        if (inside.isNotEmpty()) {
+            openText(readingOrder(inside))
+            return
+        }
+        if (Build.VERSION.SDK_INT < 30) {
+            toast("No Chinese marked there")
+            return
+        }
+        val o = ocr ?: OcrMode(this, workerHandler) { chars -> main.post { setOcr(chars) } }.also { ocr = it }
+        o.readArea(area) { text, why -> main.post { if (text != null) openText(text) else toast(why ?: "Nothing found") } }
+    }
+
+    /** Characters in reading order: lines top to bottom (a new line when one starts below the last's middle), left to right. */
+    private fun readingOrder(ms: List<Mark>): String {
+        val lines = ArrayList<ArrayList<Mark>>()
+        for (m in ms.sortedBy { it.top }) {
+            val line = lines.lastOrNull()
+            if (line != null && m.top < line.maxOf { (it.top + it.bottom) / 2 }) line.add(m) else lines.add(arrayListOf(m))
+        }
+        return lines.joinToString("") { l -> l.sortedBy { it.left }.joinToString("") { String(Character.toChars(it.cp)) } }
+    }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+
+    private fun openText(text: String) {
+        startActivity(
+            Intent(this, PanelActivity::class.java)
+                .putExtra(PanelActivity.EXTRA_TEXT, text)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     /** From the Quick Settings tile: look mode on, and the shade out of the way so the screen can be tapped. */
@@ -275,6 +337,7 @@ class XueService : AccessibilityService() {
 
     override fun onDestroy() {
         running = null
+        StatusNote.hide(this)
         if (Build.VERSION.SDK_INT >= 33) tap?.stop()
         if (Build.VERSION.SDK_INT >= 30) ocr?.close()
         if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(prefListener)

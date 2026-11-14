@@ -250,6 +250,101 @@ class OcrMode(
             }
     }
 
+    /**
+     * Reads the text in one box of the screen once (select mode), whether OCR mode is on or not.
+     * [cb] gets the text (spaces and line breaks removed: Chinese doesn't use them) or, if it failed, null and why.
+     */
+    fun readArea(area: RectF, cb: (String?, String?) -> Unit) {
+        // A moment for the select veil to leave the screen before the screenshot.
+        worker.postDelayed({
+            if (ready) {
+                shootArea(area, cb)
+            } else {
+                ModuleInstall.getClient(service).areModulesAvailable(recognizer)
+                    .addOnSuccessListener(onWorker) { r ->
+                        if (r.areModulesAvailable()) {
+                            ready = true
+                            shootArea(area, cb)
+                        } else {
+                            download()
+                            cb(null, "Downloading the OCR model first (once): try again in a minute")
+                        }
+                    }
+                    .addOnFailureListener(onWorker) { cb(null, "Reading images needs Google Play services") }
+            }
+        }, 250)
+    }
+
+    private fun shootArea(area: RectF, cb: (String?, String?) -> Unit) {
+        var windowId = -1
+        var dx = 0
+        var dy = 0
+        if (Build.VERSION.SDK_INT >= 34) {
+            for (w in service.windows.sortedByDescending { it.layer }) {
+                if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+                val b = Rect()
+                w.getBoundsInScreen(b)
+                if (!b.contains(area.centerX().toInt(), area.centerY().toInt())) continue
+                if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION && w.root?.packageName != service.packageName) {
+                    windowId = w.id
+                    dx = b.left
+                    dy = b.top
+                }
+                break
+            }
+        }
+        val shotCb = object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(shot: AccessibilityService.ScreenshotResult) {
+                val crop = try {
+                    val hb = shot.hardwareBuffer
+                    val hw = Bitmap.wrapHardwareBuffer(hb, shot.colorSpace)
+                    val soft = hw?.copy(Bitmap.Config.ARGB_8888, false)
+                    hw?.recycle()
+                    hb.close()
+                    soft?.let { full ->
+                        val r = Rect(
+                            (area.left - dx).toInt(), (area.top - dy).toInt(),
+                            (area.right - dx).toInt(), (area.bottom - dy).toInt(),
+                        )
+                        if (!r.intersect(0, 0, full.width, full.height)) null
+                        else Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height()).also { if (it !== full) full.recycle() }
+                    }
+                } catch (t: Throwable) {
+                    null
+                }
+                if (crop == null) {
+                    cb(null, "Couldn't read the screenshot")
+                    return
+                }
+                recognizer.process(InputImage.fromBitmap(crop, 0))
+                    .addOnSuccessListener(onWorker) { text ->
+                        crop.recycle()
+                        val t = text.text.replace(Regex("\\s+"), "")
+                        cb(t.ifEmpty { null }, if (t.isEmpty()) "No text found there" else null)
+                    }
+                    .addOnFailureListener(onWorker) { e ->
+                        crop.recycle()
+                        cb(null, "Recognition failed: ${e.message ?: e.javaClass.simpleName}")
+                    }
+            }
+
+            override fun onFailure(errorCode: Int) {
+                cb(null, when (errorCode) {
+                    AccessibilityService.ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS ->
+                        "Android doesn't let 学 take screenshots yet: turn \"学 marks\" off and on in Accessibility settings"
+                    AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW -> "This app doesn't allow screenshots"
+                    else -> "Screenshot failed ($errorCode)"
+                })
+            }
+        }
+        try {
+            if (windowId >= 0 && Build.VERSION.SDK_INT >= 34) service.takeScreenshotOfWindow(windowId, onWorker, shotCb)
+            else service.takeScreenshot(Display.DEFAULT_DISPLAY, onWorker, shotCb)
+        } catch (t: Throwable) {
+            cb(null, "Screenshot failed: ${t.message ?: t.javaClass.simpleName}")
+        }
+    }
+
     private fun done(msg: String, chars: List<OcrChar>?) {
         busy = false
         status = msg

@@ -15,6 +15,17 @@ it too. A touch that starts on a character comes to 学: a quick tap opens the p
 holding, a second finger) is handed back while the finger is still down. The **学 tap** Quick Settings tile turns
 it on and off. Some apps change behaviour when touch exploration is on (they think a screen reader is running).
 
+A tapped character opens its card from the quiz, filled with your data (date added, error rate) even when the
+panel's quiz isn't signed in: the app gives it your list and results. With **Quiz me** on, the quiz asks the
+character as a question instead.
+
+**Select area** (from 学's notification or the **学 select** tile): drag a box over text, or a picture of text;
+the characters marked there (or, if none, the area read by OCR) open in the quiz as text shared to it does,
+split into words.
+
+While 学 is on, a small 学 shows in the status bar (Android 13+: allow notifications); pulled down, it lists the
+modes that are on, with buttons for Select area, Tap and OCR.
+
 **OCR mode** (extra, off by default, Android 11+): characters in pictures, video and games, which have no text
 for the accessibility service, are read from screenshots with ML Kit's on-device Chinese text recognition and
 marked the same way (tap them too). The model isn't in the APK: Google Play services downloads it once, the first

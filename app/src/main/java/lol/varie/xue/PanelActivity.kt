@@ -37,6 +37,8 @@ import androidx.webkit.WebViewFeature
 class PanelActivity : Activity() {
     companion object {
         const val EXTRA_CHAR = "char"
+        /** Text from select mode: opened as the quiz opens text shared to it (search, its words to pick). */
+        const val EXTRA_TEXT = "text"
         const val QUIZ = "https://varie.lol/h/"
     }
 
@@ -45,8 +47,10 @@ class PanelActivity : Activity() {
     /** Mine.syncedAt when the page was loaded: newer data means a reload on the next open. */
     private var dataAt = -1L
     private var loaded = false
-    /** A character asked for while the page was signing in, shown when that is done. */
-    private var after: String? = null
+    /** What to do once the page being loaded has finished. */
+    private var pending: (() -> Unit)? = null
+    /** Loads so far: each one gets its own address, so it really loads. */
+    private var loads = 0
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,10 +104,9 @@ class PanelActivity : Activity() {
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loaded = true
-                    // After a sign-in link the page has saved the list; now show the character.
-                    after?.let { ch ->
-                        after = null
-                        view.postDelayed({ show(ch) }, 1500)
+                    pending?.let { p ->
+                        pending = null
+                        p()
                     }
                 }
             }
@@ -129,7 +132,9 @@ class PanelActivity : Activity() {
     }
 
     private fun open(intent: Intent?) {
-        val ch = intent?.getStringExtra(EXTRA_CHAR) ?: return
+        val ch = intent?.getStringExtra(EXTRA_CHAR)
+        val text = intent?.getStringExtra(EXTRA_TEXT)
+        if (ch == null && text == null) return
         if (!Freq.loaded) Freq.load(applicationContext)
         if (Mine.words == 0) Mine.load(applicationContext)
         // Newer list or results than the page has: hand them over and load it again.
@@ -143,19 +148,63 @@ class PanelActivity : Activity() {
         if (sync != null) {
             // Sign the panel's quiz in to the user's list once: the quiz saves the link's code and key itself.
             prefs.edit().remove(Prefs.PENDING_SYNC).apply()
-            after = ch
             loaded = false
+            // Once the page has saved the list, show what was asked for.
+            pending = { web.postDelayed({ go(ch, text) }, 1500) }
             web.loadUrl(QUIZ + "#sync=" + sync)
             return
         }
-        show(ch)
+        go(ch, text)
     }
 
-    /** The quiz looking at [ch]: a fresh load the first time, then only the page's #, so nothing reloads. */
+    private fun go(ch: String?, text: String?) {
+        if (text != null) share(text) else if (ch != null) show(ch)
+    }
+
+    /** A fresh load of the quiz (the query makes each address new, so it really loads). */
+    private fun fresh(hash: String = "") = web.loadUrl(QUIZ + "?d=" + dataAt + "&n=" + (++loads) + hash)
+
+    /**
+     * The quiz on [ch]. Normally its card: the page is opened plain and then moved to the character, which the
+     * quiz shows as a card (a character in the address of a fresh load is asked as a question instead).
+     * In quiz mode (settings) that question is what's wanted, so each one is a fresh load with it in the address.
+     */
     private fun show(ch: String) {
-        // The query only makes a new load differ from the page already open (a # alone wouldn't reload it).
-        val url = QUIZ + "?d=" + dataAt + "#" + Uri.encode(ch)
-        if (!loaded) web.loadUrl(url) else web.evaluateJavascript("location.hash = ${jsString(ch)}", null)
+        if (Prefs.get(this).getBoolean(Prefs.QUIZ, false)) {
+            loaded = false
+            fresh("#" + Uri.encode(ch))
+            return
+        }
+        if (loaded) {
+            focus(ch)
+        } else {
+            pending = { focus(ch) }
+            fresh()
+        }
+    }
+
+    /** Moves the open quiz to [ch] (its card), once the page has started. */
+    private fun focus(ch: String) {
+        web.evaluateJavascript(
+            """
+            (function f(n){
+              try { if (own && (cur || shown)) { location.hash = encodeURIComponent(${jsString(ch)}); return; } } catch (e) {}
+              if (n < 75) setTimeout(function(){ f(n + 1); }, 200);
+            })(0);
+            """.trimIndent(), null,
+        )
+    }
+
+    /** Text from select mode, handed to the quiz the way Android's Share gives it text (its "h-share" cache, ?share=1). */
+    private fun share(text: String) {
+        val js = "caches.open('h-share').then(function(c){ return c.put('text', new Response(${jsString(text)})); })" +
+            ".then(function(){ location.href = location.pathname + '?share=1'; });"
+        if (loaded) {
+            web.evaluateJavascript(js, null)
+        } else {
+            pending = { web.evaluateJavascript(js, null) }
+            fresh()
+        }
     }
 
     /** The quiz's default_list.txt, answered with your list (when the app has one). */
@@ -189,7 +238,7 @@ class PanelActivity : Activity() {
         }.getOrNull()
     }
 
-    private fun jsString(s: String) = "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    private fun jsString(s: String) = org.json.JSONObject.quote(s)
 
     private fun hide() {
         moveTaskToBack(true)

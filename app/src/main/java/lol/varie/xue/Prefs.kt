@@ -13,6 +13,8 @@ object Prefs {
     const val TAP = "tap"
     /** OCR mode: also read characters in images, video and games from screenshots (Android 11+; off by default). */
     const val OCR = "ocr"
+    /** Quiz mode: a character's panel asks it as a question instead of showing its card. */
+    const val QUIZ = "quiz"
     /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
     const val BUTTON = "button"
     /** Where the floating look button was left. */
