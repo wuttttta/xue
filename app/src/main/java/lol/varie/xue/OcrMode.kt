@@ -11,6 +11,10 @@ import android.os.Handler
 import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityWindowInfo
+import com.google.android.gms.common.moduleinstall.InstallStatusListener
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -27,6 +31,9 @@ class OcrChar(val box: RectF, val cp: Int)
  *
  * It reads again every [EVERY_MS] while on, and soon after a scroll stops (marks from before a scroll are dropped
  * at once, since they no longer match the screen).
+ *
+ * The recognition model is not in the APK: Google Play services downloads it the first time OCR is turned on
+ * (ModuleInstall) and keeps it, so later starts are immediate and offline.
  */
 @TargetApi(30)
 class OcrMode(
@@ -43,6 +50,8 @@ class OcrMode(
     private val onWorker = Executor { worker.post(it) }
     @Volatile private var running = false
     private var busy = false
+    /** The model is on the phone. */
+    @Volatile private var ready = false
     private var lastShot = 0L
     /** What it is doing, for the settings screen. */
     @Volatile var status = ""; private set
@@ -53,7 +62,63 @@ class OcrMode(
         if (running) return
         running = true
         status = "Starting…"
-        kick(0)
+        if (ready) kick(0) else ensureModel()
+    }
+
+    /** Checks that Play services has the model; downloads it once if not. Reading starts when it's there. */
+    private fun ensureModel() {
+        val client = ModuleInstall.getClient(service)
+        client.areModulesAvailable(recognizer)
+            .addOnSuccessListener(onWorker) { r ->
+                if (r.areModulesAvailable()) {
+                    ready = true
+                    kick(0)
+                } else {
+                    download()
+                }
+            }
+            .addOnFailureListener(onWorker) { e ->
+                status = "OCR needs Google Play services (${e.message ?: e.javaClass.simpleName})"
+            }
+    }
+
+    private fun download() {
+        val client = ModuleInstall.getClient(service)
+        status = "Downloading the OCR model (once)…"
+        val listener = object : InstallStatusListener {
+            override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
+                update.progressInfo?.let { p ->
+                    if (p.totalBytesToDownload > 0) {
+                        status = "Downloading the OCR model (once): ${100 * p.bytesDownloaded / p.totalBytesToDownload}%"
+                    }
+                }
+                when (update.installState) {
+                    ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> {
+                        client.unregisterListener(this)
+                        ready = true
+                        status = "Model ready"
+                        kick(0)
+                    }
+                    ModuleInstallStatusUpdate.InstallState.STATE_FAILED,
+                    ModuleInstallStatusUpdate.InstallState.STATE_CANCELED -> {
+                        client.unregisterListener(this)
+                        status = "Couldn't download the OCR model: turn OCR off and on to try again"
+                    }
+                }
+            }
+        }
+        val req = ModuleInstallRequest.newBuilder().addApi(recognizer).setListener(listener, onWorker).build()
+        client.installModules(req)
+            .addOnSuccessListener(onWorker) { resp ->
+                if (resp.areModulesAlreadyInstalled()) {
+                    client.unregisterListener(listener)
+                    ready = true
+                    kick(0)
+                }
+            }
+            .addOnFailureListener(onWorker) { e ->
+                status = "Couldn't download the OCR model (${e.message ?: e.javaClass.simpleName})"
+            }
     }
 
     fun stop() {
@@ -76,7 +141,7 @@ class OcrMode(
     }
 
     private fun kick(delay: Long) {
-        if (!running) return
+        if (!running || !ready) return
         worker.removeCallbacks(tick)
         // Android allows about three screenshots a second.
         val wait = maxOf(delay, lastShot + 400 - SystemClock.uptimeMillis(), 0)

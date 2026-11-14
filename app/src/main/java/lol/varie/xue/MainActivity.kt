@@ -127,7 +127,8 @@ class MainActivity : Activity() {
             })
             col.addView(text(
                 "An extra mode: 学 takes a screenshot every ${OcrMode.EVERY_MS / 1000.0} s and after each scroll, and reads " +
-                    "the Chinese in pictures, video and games on the phone (offline). Their characters get the same " +
+                    "the Chinese in pictures, video and games on the phone. The first time, Google Play services " +
+                    "downloads the recognition model (once; offline after that). Their characters get the same " +
                     "marks and open the same card. Uses more battery: turn it on when you need it, with the " +
                     "\"学 OCR\" Quick Settings tile.", 13f, muted()
             ))

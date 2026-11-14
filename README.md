@@ -17,7 +17,8 @@ it on and off. Some apps change behaviour when touch exploration is on (they thi
 
 **OCR mode** (extra, off by default, Android 11+): characters in pictures, video and games, which have no text
 for the accessibility service, are read from screenshots with ML Kit's on-device Chinese text recognition and
-marked the same way (tap them too). Turn it on with the **学 OCR** Quick Settings tile when you need it; it reads
+marked the same way (tap them too). The model isn't in the APK: Google Play services downloads it once, the first
+time OCR is turned on, and keeps it. Turn it on with the **学 OCR** Quick Settings tile when you need it; it reads
 every 1.5 s and after each scroll, so it costs battery. Screenshots are taken by the accessibility service itself
 (no screen-recording prompt; Android 14+ captures the app's window alone) and never leave the phone.
 
@@ -77,4 +78,4 @@ an update fails (in Obtainium too) until the old app is uninstalled:
   (how often it is a word on its own); characters missing from the file count as F5.
 - Colours from varie.lol/h.
 - OCR: [ML Kit Text Recognition v2](https://developers.google.com/ml-kit/vision/text-recognition/v2), Chinese
-  model, bundled (Google's ML Kit terms).
+  model, through Google Play services (Google's ML Kit terms).

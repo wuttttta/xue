@@ -48,6 +48,7 @@ android {
 }
 
 dependencies {
-    // OCR mode: on-device Chinese text recognition, model bundled in the APK (works offline).
-    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    // OCR mode: on-device Chinese text recognition through Google Play services. The model isn't in the APK:
+    // Play services downloads it once, when OCR is first turned on, and keeps it (offline after that).
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.2")
 }
