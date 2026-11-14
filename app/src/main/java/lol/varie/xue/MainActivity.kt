@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var apps: TextView
     private lateinit var mine: TextView
     private lateinit var codeIn: EditText
+    private var tapStatus: TextView? = null
     private var dp = 1f
     private var dark = false
     private val tick = object : Runnable {
@@ -76,6 +77,23 @@ class MainActivity : Activity() {
         }
 
         col.addView(heading("Look up"))
+        if (Build.VERSION.SDK_INT >= 33) {
+            col.addView(Switch(this).apply {
+                text = "Tap a character to look it up (experimental)"
+                textSize = 16f
+                setTextColor(fg())
+                isChecked = prefs.getBoolean(Prefs.TAP, false)
+                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
+                setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.TAP, on).apply() }
+            })
+            col.addView(text(
+                "A plain tap on a character opens its card; scrolling, typing, links and buttons go to the app as usual. " +
+                    "To do it 学 handles touch first, like TalkBack, so some apps may act as if a screen reader were on. " +
+                    "If touches ever stop working, it turns itself off.", 13f, muted()
+            ))
+            tapStatus = text("", 13f).also { col.addView(it) }
+            col.addView(text("Or, without tap mode:", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
+        }
         col.addView(text(
             "Pull down Quick Settings and tap \"学 look\", then tap a character: its card from the quiz opens over the app. " +
                 "A tap anywhere else goes back to normal.", 14f
@@ -181,6 +199,17 @@ class MainActivity : Activity() {
 
         data.text = if (!Freq.loaded) "Loading…" else
             "%,d characters with ƒ, %s copy".format(Freq.size, if (Freq.fromDownload) "downloaded" else "bundled")
+
+        tapStatus?.let { t ->
+            val want = Prefs.get(this).getBoolean(Prefs.TAP, false)
+            t.text = when {
+                !want -> ""
+                !on -> "Tap mode starts when the service is on."
+                XueService.running?.tapActive == true -> "● Tap mode is on."
+                else -> "Tap mode is waiting for Android: turn \"学 marks\" off and on again in Accessibility settings."
+            }
+            t.setTextColor(if (XueService.running?.tapActive == true) Palette.freq(3, dark) else fg())
+        }
 
         val code = Mine.code(this)
         mine.text = when {

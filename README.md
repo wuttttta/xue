@@ -5,7 +5,14 @@ your list get your level's colour from the quiz at [varie.lol/h](https://varie.l
 yellow … L5 dark red, by how often you get them wrong); every other character gets a blue by how common it is
 (ƒ, F1 commonest … F5 rarest). Same colours as the quiz.
 
-Tap the **学 look** Quick Settings tile, then any character: the quiz's card for it opens in a sheet over the app.
+With **tap mode** on (Android 13+, experimental), a plain tap on any character opens the quiz's card for it in
+a sheet over the app, like Lens. Without it: tap the **学 look** Quick Settings tile, then the character.
+
+Tap mode works the way Android allows: 学 asks for touch exploration (as screen readers do) and handles each touch
+first through a `TouchInteractionController`. A touch that doesn't start on a character, or starts on a link or
+button, goes straight back to the app; one that starts on a character is kept only if it is a quick tap without
+moving. If handing touches back ever fails, tap mode turns itself off. Some apps change behaviour when touch
+exploration is on (they think a screen reader is running).
 
 Status: steps 1–3 of the plan (marks by frequency, your levels, look mode with the panel). Next: OCR for text
 in images.

@@ -48,6 +48,11 @@ class XueService : AccessibilityService() {
     private var button: LookButton? = null
     private var buttonParams: WindowManager.LayoutParams? = null
     @Volatile private var looking = false
+    private var tap: TapMode? = null
+    @Volatile private var tapOn = false
+    @Volatile private var lastScrollAt = 0L
+    /** Tap mode is on and Android has granted it. */
+    val tapActive: Boolean get() = tap?.active == true
     val isLooking: Boolean get() = looking
     private lateinit var prefs: SharedPreferences
     @Volatile private var show = true
@@ -59,11 +64,13 @@ class XueService : AccessibilityService() {
         when (key) {
             Prefs.SHOW -> {
                 show = p.getBoolean(Prefs.SHOW, true)
-                if (show) requestScan() else main.post { if (!looking) layer?.setMarks(emptyList()) }
+                main.post { layer?.drawMarks = show }
+                requestScan()
             }
             Prefs.BUTTON -> main.post {
                 button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
             }
+            Prefs.TAP -> main.post { applyTapMode() }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
@@ -76,6 +83,8 @@ class XueService : AccessibilityService() {
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         addLayer()
         addButton()
+        layer?.drawMarks = show
+        applyTapMode()
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
             Mine.load(this)
@@ -155,7 +164,7 @@ class XueService : AccessibilityService() {
             runCatching { wm?.updateViewLayout(it, lp) }
         }
         button?.looking = on
-        if (on) requestScan() else if (!show) layer?.setMarks(emptyList())
+        requestScan()
         LookTile.refresh(this)
     }
 
@@ -169,7 +178,33 @@ class XueService : AccessibilityService() {
     private fun onPick(cp: Int?) {
         // The layer covers the panel too, so it must stop taking touches before the panel shows.
         setLooking(false)
-        if (cp == null) return
+        if (cp != null) openPanel(cp)
+    }
+
+    /** Tap mode on or off, as set in 学's settings (Android 13+). */
+    private fun applyTapMode() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val want = prefs.getBoolean(Prefs.TAP, false)
+        if (want) {
+            val t = tap ?: TapMode(
+                this, main,
+                markAt = { x, y -> layer?.markAt(x, y) },
+                scrolling = { SystemClock.uptimeMillis() - lastScrollAt < 400 },
+                onTap = ::openPanel,
+                onGiveUp = { msg ->
+                    prefs.edit().putBoolean(Prefs.TAP, false).apply()
+                    android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+                },
+            ).also { tap = it }
+            t.start()
+        } else {
+            tap?.stop()
+        }
+        tapOn = tapActive
+        requestScan()
+    }
+
+    private fun openPanel(cp: Int) {
         startActivity(
             Intent(this, PanelActivity::class.java)
                 .putExtra(PanelActivity.EXTRA_CHAR, String(Character.toChars(cp)))
@@ -178,7 +213,8 @@ class XueService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (show || looking) requestScan()
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) lastScrollAt = SystemClock.uptimeMillis()
+        if (show || looking || tapOn) requestScan()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -191,6 +227,7 @@ class XueService : AccessibilityService() {
 
     override fun onDestroy() {
         running = null
+        if (Build.VERSION.SDK_INT >= 33) tap?.stop()
         if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         layer?.let { runCatching { wm?.removeView(it) } }
         button?.let { runCatching { wm?.removeView(it) } }
@@ -225,8 +262,8 @@ class XueService : AccessibilityService() {
     private fun scan() {
         scanQueued = false
         lastScan = SystemClock.uptimeMillis()
-        // With marks off, look mode still shows them while it lasts, so there is something to tap.
-        if (!show && !looking) return
+        // With marks off they are still found (not drawn) for tap mode, and drawn while look mode lasts.
+        if (!show && !looking && !tapOn) return
         if (!Freq.loaded) Freq.load(this)
         val marks = try {
             collect()
@@ -234,7 +271,7 @@ class XueService : AccessibilityService() {
             // Nodes can vanish mid-scan; the next event brings a new one.
             return
         }
-        main.post { if (show || looking) layer?.setMarks(marks) }
+        main.post { layer?.setMarks(marks) }
     }
 
     private class Scan(val dark: Boolean, val covered: Region, val win: Rect) {
@@ -261,7 +298,7 @@ class XueService : AccessibilityService() {
                 if (root != null && root.packageName != packageName) {
                     val t0 = SystemClock.uptimeMillis()
                     val s = Scan(dark, covered, wb)
-                    walk(root, 0, s)
+                    walk(root, 0, false, s)
                     all.addAll(s.out)
                     Stats.record(
                         root.packageName?.toString() ?: "?",
@@ -274,21 +311,22 @@ class XueService : AccessibilityService() {
         return all
     }
 
-    private fun walk(node: AccessibilityNodeInfo, depth: Int, s: Scan) {
+    /** [parentClickable]: the parent is a link or button; with the node's own flag it makes its text "clickable". */
+    private fun walk(node: AccessibilityNodeInfo, depth: Int, parentClickable: Boolean, s: Scan) {
         if (depth > MAX_DEPTH || s.nodes >= MAX_NODES) return
         s.nodes++
         if (!node.isVisibleToUser) return
         val text = node.text
-        if (!text.isNullOrEmpty()) markText(node, text.toString(), s)
+        if (!text.isNullOrEmpty()) markText(node, text.toString(), parentClickable || node.isClickable, s)
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            walk(child, depth + 1, s)
+            walk(child, depth + 1, node.isClickable, s)
         }
     }
 
     private fun isHan(cp: Int) = Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN
 
-    private fun markText(node: AccessibilityNodeInfo, text: String, s: Scan) {
+    private fun markText(node: AccessibilityNodeInfo, text: String, clickable: Boolean, s: Scan) {
         var first = -1
         var last = -1
         var i = 0
@@ -336,7 +374,7 @@ class XueService : AccessibilityService() {
             // Yours in your level's colour (warm), every other character by ƒ (blue).
             val mine = Mine.level(cp)
             val color = if (mine >= 0) Palette.level(mine, s.dark) else Palette.freq(Freq.level(cp), s.dark)
-            s.out.add(Mark(r.left, r.top, r.right, r.bottom, cp, color))
+            s.out.add(Mark(r.left, r.top, r.right, r.bottom, cp, color, clickable))
         }
     }
 }

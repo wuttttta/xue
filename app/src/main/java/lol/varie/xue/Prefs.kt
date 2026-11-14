@@ -9,6 +9,8 @@ object Prefs {
     /** The user's list code on paste.varie.lol (read-only; never a token). */
     const val LIST_CODE = "list_code"
     const val SYNCED_AT = "synced_at"
+    /** Tap mode: a plain tap on a character opens its panel (Android 13+, experimental; off until switched on). */
+    const val TAP = "tap"
     /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
     const val BUTTON = "button"
     /** Where the floating look button was left. */

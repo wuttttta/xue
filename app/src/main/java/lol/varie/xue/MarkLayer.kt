@@ -8,8 +8,14 @@ import android.graphics.Paint
 import android.view.MotionEvent
 import android.view.View
 
-/** One character on screen: its box in screen coordinates, the character and its colour. */
-class Mark(val left: Float, val top: Float, val right: Float, val bottom: Float, val cp: Int, val color: Int)
+/**
+ * One character on screen: its box in screen coordinates, the character and its colour.
+ * [clickable]: it is part of a link or button (its node or the node's parent is clickable), so a tap belongs to the app.
+ */
+class Mark(
+    val left: Float, val top: Float, val right: Float, val bottom: Float,
+    val cp: Int, val color: Int, val clickable: Boolean,
+)
 
 /**
  * The see-through layer: a light underline under each marked character.
@@ -35,6 +41,19 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
             invalidate()
         }
 
+    /** Whether the marks are drawn; they are kept for tap mode either way. */
+    var drawMarks = true
+        set(v) {
+            field = v
+            invalidate()
+        }
+
+    /** The character at a screen point (a tap in tap mode), with a small margin. */
+    fun markAt(x: Float, y: Float): Mark? {
+        val slop = 4 * density
+        return marks.firstOrNull { x >= it.left - slop && x <= it.right + slop && y >= it.top - slop && y <= it.bottom + slop }
+    }
+
     fun setMarks(list: List<Mark>) {
         marks = list
         invalidate()
@@ -42,7 +61,7 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
 
     override fun onDraw(canvas: Canvas) {
         if (looking) canvas.drawColor(Color.argb(28, 0, 0, 0))
-        if (marks.isEmpty()) return
+        if (marks.isEmpty() || !(drawMarks || looking)) return
         // Marks are in screen coordinates; the layer may not start at the screen's top left.
         getLocationOnScreen(loc)
         canvas.save()
