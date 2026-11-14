@@ -80,7 +80,7 @@ class MainActivity : Activity() {
         col.addView(heading("Look up"))
         if (Build.VERSION.SDK_INT >= 33) {
             col.addView(Switch(this).apply {
-                text = "Tap a character to look it up (experimental)"
+                text = "Tap mode: tap or drag on characters"
                 textSize = 16f
                 setTextColor(fg())
                 isChecked = prefs.getBoolean(Prefs.TAP, false)
@@ -88,9 +88,11 @@ class MainActivity : Activity() {
                 setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.TAP, on).apply() }
             })
             col.addView(text(
-                "A plain tap on a character opens its card; everything else (scrolling, typing, links, buttons) goes " +
-                    "to the app as usual. It uses Android's touch exploration, like TalkBack, so some apps may act as " +
-                    "if a screen reader were on. The \"学 tap\" Quick Settings tile turns it on and off.", 13f, muted()
+                "Tap a character: its card. Drag from a character over a sentence: the quiz opens it, split into words. " +
+                    "Touches that don't start on a character (scrolling from a blank part, links, buttons, typing) go to " +
+                    "the app as usual; a drag on text selects instead of scrolling. It uses Android's touch exploration, " +
+                    "like TalkBack, so some apps may act as if a screen reader were on. The \"学 tap\" Quick Settings " +
+                    "tile, or the button in 学's notification, turns it on and off.", 13f, muted()
             ))
             tapStatus = text("", 13f).also { col.addView(it) }
             col.addView(button("Add the ${LookTile.label} tile") {
@@ -125,9 +127,9 @@ class MainActivity : Activity() {
 
         col.addView(heading("Read a sentence"))
         col.addView(text(
-            "\"Select area\" in 学's notification, or the \"学 select\" Quick Settings tile: drag a box over some text " +
-                "(or a picture of it) and the quiz opens it, split into words, as when you share text to it. " +
-                "While you drag, the screen takes no other touches; a tap cancels.", 14f
+            "In tap mode, drag from a character over the sentence. Anywhere else (a picture with OCR off, tap mode " +
+                "off): \"Select area\" in 学's notification or the \"学 select\" Quick Settings tile, then drag a box. " +
+                "The quiz opens the text split into words, as when you share text to it.", 14f
         ))
         if (Build.VERSION.SDK_INT >= 33) {
             col.addView(button("Add the 学 select tile") {

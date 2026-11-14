@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.TouchInteractionController
 import android.annotation.TargetApi
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Region
 import android.os.Handler
 import android.view.Display
@@ -21,9 +22,10 @@ import kotlin.math.abs
  * - The whole screen except the characters is a **passthrough region** (setTouchExplorationPassthroughRegion):
  *   Android hands those touches straight to the app itself, without asking 学. Characters in links and buttons
  *   stay in the region, so their taps keep working too.
- * - A touch that starts on a character comes to 学. A quick tap without moving opens the panel. Anything else
- *   (moving, holding, a second finger, a scroll still going) is handed back while the finger is still down
- *   (requestDelegating), so the app sees the scroll or the long press, only slightly late.
+ * - A touch that starts on a character comes to 学. Lifted without moving: the character's panel opens. Moved:
+ *   it draws a box from where it started ([onBox]), and lifting the finger reads the text in the box ([onSelect]),
+ *   so a sentence is one drag away. A second finger (pinch) or a scroll still going hands the touch back to the
+ *   app (requestDelegating). The price: in tap mode a drag that starts on text selects instead of scrolling.
  *
  * Android still sends 学 the first event of a touch it is already passing through (the controller is then in
  * STATE_DELEGATING): those are ignored, and nothing is ever handed back twice. (Doing so made requestDelegating
@@ -38,6 +40,10 @@ class TapMode(
     /** True while something on screen is scrolling (a tap then only stops the scroll). */
     private val scrolling: () -> Boolean,
     private val onTap: (Int) -> Unit,
+    /** The box being dragged (screen coordinates), or null when it's gone. */
+    private val onBox: (RectF?) -> Unit,
+    /** A finished box: read the text in it. */
+    private val onSelect: (RectF) -> Unit,
 ) {
     private val slop = ViewConfiguration.get(service).scaledTouchSlop
     private val density = service.resources.displayMetrics.density
@@ -46,11 +52,11 @@ class TapMode(
     private var down = false
     private var downX = 0f
     private var downY = 0f
+    /** The touch became a drag: a selection box. */
+    private var box: RectF? = null
     private var looking = false
     private var marks: List<Mark> = emptyList()
     var active = false; private set
-
-    private val holdTooLong = Runnable { if (held != null && down) { held = null; delegate() } }
 
     private val callback = object : TouchInteractionController.Callback {
         override fun onMotionEvent(e: MotionEvent) {
@@ -66,7 +72,10 @@ class TapMode(
             if (state == TouchInteractionController.STATE_CLEAR) {
                 held = null
                 down = false
-                main.removeCallbacks(holdTooLong)
+                if (box != null) {
+                    box = null
+                    onBox(null)
+                }
             }
         }
     }
@@ -92,8 +101,11 @@ class TapMode(
     }
 
     fun stop() {
-        main.removeCallbacks(holdTooLong)
         held = null
+        if (box != null) {
+            box = null
+            onBox(null)
+        }
         down = false
         runCatching { ctl?.unregisterAllCallbacks() }
         ctl = null
@@ -147,8 +159,8 @@ class TapMode(
     private fun handle(e: MotionEvent) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                main.removeCallbacks(holdTooLong)
                 down = true
+                box = null
                 if (notOurs()) {
                     held = null
                     return
@@ -163,30 +175,50 @@ class TapMode(
                 held = m
                 downX = e.x
                 downY = e.y
-                // Held longer than a tap: give it to the app, which then sees its own long press (text selection).
-                main.postDelayed(holdTooLong, 300)
             }
-            MotionEvent.ACTION_MOVE -> if (held != null && (abs(e.x - downX) > slop || abs(e.y - downY) > slop)) {
-                held = null
-                main.removeCallbacks(holdTooLong)
-                delegate()
+            MotionEvent.ACTION_MOVE -> if (held != null) {
+                if (box != null || abs(e.x - downX) > slop || abs(e.y - downY) > slop) {
+                    val b = RectF(minOf(downX, e.x), minOf(downY, e.y), maxOf(downX, e.x), maxOf(downY, e.y))
+                    // A box at least as tall as the character it started on, so one line is easy to take.
+                    val h = held!!.bottom - held!!.top
+                    if (b.height() < h) {
+                        val cy = (held!!.top + held!!.bottom) / 2
+                        b.top = minOf(b.top, cy - h / 2)
+                        b.bottom = maxOf(b.bottom, cy + h / 2)
+                    }
+                    box = b
+                    onBox(b)
+                }
             }
             MotionEvent.ACTION_POINTER_DOWN -> if (held != null) {
+                // Two fingers: a pinch for the app.
                 held = null
-                main.removeCallbacks(holdTooLong)
+                if (box != null) {
+                    box = null
+                    onBox(null)
+                }
                 delegate()
             }
             MotionEvent.ACTION_UP -> {
-                main.removeCallbacks(holdTooLong)
                 down = false
                 val m = held
+                val b = box
                 held = null
-                if (m != null) onTap(m.cp)
+                box = null
+                if (b != null) {
+                    onBox(null)
+                    onSelect(b)
+                } else if (m != null) {
+                    onTap(m.cp)
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
-                main.removeCallbacks(holdTooLong)
                 held = null
                 down = false
+                if (box != null) {
+                    box = null
+                    onBox(null)
+                }
             }
         }
     }

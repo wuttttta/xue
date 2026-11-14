@@ -66,6 +66,13 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
         setShadowLayer(4 * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
     }
 
+    /** A box being dragged in tap mode (drawn without the select veil); null to clear. */
+    fun setBox(b: RectF?) {
+        liveBox = b
+        invalidate()
+    }
+    private var liveBox: RectF? = null
+
     /** The marks now on screen (for select mode: the characters inside the box). */
     fun current(): List<Mark> = marks
 
@@ -88,21 +95,22 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (onArea != null) {
-            canvas.drawColor(Color.argb(70, 0, 0, 0))
-            val b = box
+        if (onArea != null || liveBox != null) {
+            if (onArea != null) canvas.drawColor(Color.argb(70, 0, 0, 0))
+            val b = box ?: liveBox
             getLocationOnScreen(loc)
             if (b == null) {
                 canvas.drawText("Drag over the text to read", width / 2f, height * 0.18f, hint)
             } else {
                 val r = RectF(b)
                 r.offset(-loc[0].toFloat(), -loc[1].toFloat())
+                // Blue (the quiz's accent) shows on light and dark pages alike.
                 boxPaint.style = Paint.Style.FILL
-                boxPaint.color = Color.argb(40, 255, 255, 255)
+                boxPaint.color = Color.argb(48, 0x2a, 0x78, 0xd6)
                 canvas.drawRoundRect(r, 6 * density, 6 * density, boxPaint)
                 boxPaint.style = Paint.Style.STROKE
                 boxPaint.strokeWidth = 2 * density
-                boxPaint.color = Color.WHITE
+                boxPaint.color = Color.rgb(0x2a, 0x78, 0xd6)
                 canvas.drawRoundRect(r, 6 * density, 6 * density, boxPaint)
             }
         }

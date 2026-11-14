@@ -262,6 +262,8 @@ class XueService : AccessibilityService() {
                 markAt = { x, y -> layer?.markAt(x, y) },
                 scrolling = { SystemClock.uptimeMillis() - lastScrollAt < 400 },
                 onTap = ::openPanel,
+                onBox = { b -> layer?.setBox(b) },
+                onSelect = { b -> readArea(b) },
             ).also { tap = it }
             t.start()
         } else {

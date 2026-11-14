@@ -19,7 +19,8 @@ A tapped character opens its card from the quiz, filled with your data (date add
 panel's quiz isn't signed in: the app gives it your list and results. With **Quiz me** on, the quiz asks the
 character as a question instead.
 
-**Select area** (from 学's notification or the **学 select** tile): drag a box over text, or a picture of text;
+**Read a sentence**: in tap mode, drag from a character over the sentence. Elsewhere, **Select area** (from 学's
+notification or the **学 select** tile): drag a box over text, or a picture of text;
 the characters marked there (or, if none, the area read by OCR) open in the quiz as text shared to it does,
 split into words.
 
