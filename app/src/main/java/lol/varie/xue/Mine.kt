@@ -33,35 +33,26 @@ object Mine {
     @Volatile var syncedAt = 0L; private set
     @Volatile var error: String? = null; private set
 
-    /** A word of your list: when it was added (as the list file writes it) and its meaning. */
-    class Entry(val word: String, val added: String, val meaning: String)
-
     /** A result line: right and wrong answers in all, and the last answers (1 right, 0 wrong, newest last). */
     class Stat(val right: Int, val wrong: Int, val last: String) {
         val level: Int get() = if (last.isEmpty()) 0 else {
             val w = last.count { it == '0' }.toDouble() / last.length
             minOf(5, 1 + Math.floor(w * 5 + 1e-9).toInt())
         }
-        val wrongShare: Double get() = if (last.isEmpty()) 0.0 else last.count { it == '0' }.toDouble() / last.length
     }
 
-    /** What the panel shows about a character: its own results, and the list words it is in. */
-    class Info(val level: Int, val stat: Stat?, val words: List<Entry>)
-
-    @Volatile private var entries: List<Entry> = emptyList()
     @Volatile private var stats: Map<String, Stat> = emptyMap()
 
-    /** Results of a list item (character or word), if any. */
-    fun stat(item: String): Stat? = stats[item]
+    /** The list file as downloaded (for the panel's quiz, as its word list), or null. */
+    fun listText(context: Context): String? = File(context.filesDir, LIST_FILE).takeIf { it.isFile }?.readText()
 
-    /** Your data for a character, or null if it isn't yours. */
-    fun info(ch: String): Info? {
-        if (ch.isEmpty()) return null
-        val lv = level(ch.codePointAt(0))
-        if (lv < 0) return null
-        // The word that is the character itself first, then the longer words containing it.
-        val ws = entries.filter { it.word.contains(ch) }.sortedBy { if (it.word == ch) 0 else 1 }
-        return Info(lv, stats[ch], ws)
+    /** Your results in the quiz's own storage format (h.stats.v1): { item: { r, w, h } }. */
+    fun statsJson(): String {
+        val o = org.json.JSONObject()
+        for ((item, st) in stats) {
+            o.put(item, org.json.JSONObject().put("r", st.right).put("w", st.wrong).put("h", st.last))
+        }
+        return o.toString()
     }
 
     /** Level 0..5 if the character is yours, else -1. */
@@ -146,7 +137,6 @@ object Mine {
 
     private fun parse(list: String?, stats: String?) {
         val map = HashMap<Int, Int>()
-        val es = ArrayList<Entry>()
         val st = HashMap<String, Stat>()
         var nWords = 0
         // Every character of a listed word is yours; New until the results say otherwise.
@@ -154,11 +144,9 @@ object Mine {
             val line = raw.trim()
             if (line.isEmpty() || line.startsWith("#")) return@forEach
             val p = line.split('|').map { it.trim() }
-            val dated = p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))
-            val word = if (dated) p.getOrNull(1) else p[0]
+            val word = if (p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))) p.getOrNull(1) else p[0]
             if (word.isNullOrEmpty()) return@forEach
             nWords++
-            es.add(Entry(word, if (dated) p[0] else "", p.getOrNull(2).orEmpty()))
             word.codePoints().forEach { cp ->
                 if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) map.putIfAbsent(cp, 0)
             }
@@ -175,13 +163,12 @@ object Mine {
             val s = Stat(p.getOrNull(1)?.toIntOrNull() ?: 0, p.getOrNull(2)?.toIntOrNull() ?: 0, h)
             st[item] = s
             // Levels are per character; results kept for whole words don't colour single characters
-            // (the panel shows them with the word).
+            // (the panel's quiz gets them all).
             if (item.codePointCount(0, item.length) != 1) return@forEach
             if (h.isNotEmpty()) nAnswered++
             map[item.codePointAt(0)] = s.level
         }
         levels = map
-        entries = es
         this.stats = st
         words = nWords
         answered = nAnswered

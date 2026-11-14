@@ -10,16 +10,29 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 /**
  * The character's panel: the quiz at varie.lol/h, opened on that character (the page's #<character>),
  * in a sheet over the bottom of the screen. A tap above the sheet or Back hides it; the page stays loaded
  * (the task goes to the back), so the next character opens at once.
+ *
+ * The quiz here can't use a passkey, so it gets your data from the app instead, and shows it in its own card:
+ * - your list: when the quiz isn't signed in it studies default_list.txt; that request is answered with your
+ *   list file as the app last downloaded it (same format), so your words, their dates and meanings are there;
+ * - your results: merged into the page's h.stats.v1 before its scripts run (item by item, the copy with more
+ *   answers wins, as the quiz merges devices), so error rates and levels show.
+ * Signed in with the "Edit list" link, the quiz syncs itself and this changes nothing it relies on.
  */
 class PanelActivity : Activity() {
     companion object {
@@ -28,7 +41,9 @@ class PanelActivity : Activity() {
     }
 
     private lateinit var web: WebView
-    private lateinit var strip: MineStrip
+    private var statsScript: ScriptHandler? = null
+    /** Mine.syncedAt when the page was loaded: newer data means a reload on the next open. */
+    private var dataAt = -1L
     private var loaded = false
     /** A character asked for while the page was signing in, shown when that is done. */
     private var after: String? = null
@@ -81,6 +96,8 @@ class PanelActivity : Activity() {
                     return true
                 }
 
+                override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest) = ownList(req)
+
                 override fun onPageFinished(view: WebView, url: String) {
                     loaded = true
                     // After a sign-in link the page has saved the list; now show the character.
@@ -91,12 +108,12 @@ class PanelActivity : Activity() {
                 }
             }
         }
-        // Your data for the character, from the app (the quiz below may not be signed in).
-        strip = MineStrip(this, dark)
-        sheet.addView(strip, LinearLayout.LayoutParams(MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        sheet.addView(View(this).apply {
-            setBackgroundColor(if (dark) Color.rgb(0x2a, 0x2e, 0x34) else Color.rgb(0xe3, 0xe6, 0xea))
-        }, LinearLayout.LayoutParams(MATCH_PARENT, (1 * dp).toInt().coerceAtLeast(1)))
+        // The quiz's service worker fetches the page's files itself: answer the list there too.
+        runCatching {
+            ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+                override fun shouldInterceptRequest(request: WebResourceRequest) = ownList(request)
+            })
+        }
         sheet.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         val h = (resources.displayMetrics.heightPixels * 0.72f).toInt()
@@ -115,7 +132,12 @@ class PanelActivity : Activity() {
         val ch = intent?.getStringExtra(EXTRA_CHAR) ?: return
         if (!Freq.loaded) Freq.load(applicationContext)
         if (Mine.words == 0) Mine.load(applicationContext)
-        strip.show(ch)
+        // Newer list or results than the page has: hand them over and load it again.
+        if (Mine.syncedAt != dataAt) {
+            injectStats()
+            dataAt = Mine.syncedAt
+            loaded = false
+        }
         val prefs = Prefs.get(this)
         val sync = prefs.getString(Prefs.PENDING_SYNC, null)
         if (sync != null) {
@@ -131,8 +153,40 @@ class PanelActivity : Activity() {
 
     /** The quiz looking at [ch]: a fresh load the first time, then only the page's #, so nothing reloads. */
     private fun show(ch: String) {
-        val url = QUIZ + "#" + Uri.encode(ch)
+        // The query only makes a new load differ from the page already open (a # alone wouldn't reload it).
+        val url = QUIZ + "?d=" + dataAt + "#" + Uri.encode(ch)
         if (!loaded) web.loadUrl(url) else web.evaluateJavascript("location.hash = ${jsString(ch)}", null)
+    }
+
+    /** The quiz's default_list.txt, answered with your list (when the app has one). */
+    private fun ownList(req: WebResourceRequest): WebResourceResponse? {
+        val u = req.url
+        if (u.host != "varie.lol" || u.path != "/h/default_list.txt") return null
+        val text = Mine.listText(applicationContext) ?: return null
+        return WebResourceResponse(
+            "text/plain", "utf-8", 200, "OK",
+            mapOf("Cache-Control" to "no-store"),
+            text.byteInputStream(Charsets.UTF_8),
+        )
+    }
+
+    /** Your results into the page's storage before its own scripts read it (the next load on). */
+    private fun injectStats() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        statsScript?.remove()
+        statsScript = null
+        if (Mine.syncedAt == 0L) return
+        val js = """
+            (function(){try{
+              var a = ${Mine.statsJson()}, k = 'h.stats.v1';
+              var m = JSON.parse(localStorage.getItem(k) || '{}') || {};
+              for (var x in a) { var l = m[x]; if (!l || ((l.r||0)+(l.w||0)) <= (a[x].r + a[x].w)) m[x] = a[x]; }
+              localStorage.setItem(k, JSON.stringify(m));
+            }catch(e){}})();
+        """.trimIndent()
+        statsScript = runCatching {
+            WebViewCompat.addDocumentStartJavaScript(web, js, setOf("https://varie.lol"))
+        }.getOrNull()
     }
 
     private fun jsString(s: String) = "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
