@@ -49,7 +49,8 @@ The Android build tools don't run on the dev machine (a Raspberry Pi), so builds
 
 Each build is signed with the runner's throwaway debug key unless these repo secrets are set, so without them
 an update fails (in Obtainium too) until the old app is uninstalled:
-`XUE_KEYSTORE_BASE64` (base64 of a `.jks`), `XUE_KEYSTORE_PASSWORD`, `XUE_KEY_ALIAS`.
+`XUE_KEYSTORE_BASE64` (base64 of a PKCS#12 keystore) and `XUE_KEYSTORE_PASSWORD`; the key alias is `xue`
+(override with `XUE_KEY_ALIAS`).
 
 ## Data and credits
 

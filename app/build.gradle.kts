@@ -22,8 +22,9 @@ android {
         if (ksFile != null) {
             create("fixed") {
                 storeFile = file(ksFile)
+                storeType = "pkcs12"
                 storePassword = System.getenv("XUE_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("XUE_KEY_ALIAS")
+                keyAlias = System.getenv("XUE_KEY_ALIAS")?.takeIf { it.isNotEmpty() } ?: "xue"
                 keyPassword = System.getenv("XUE_KEYSTORE_PASSWORD")
             }
         }
