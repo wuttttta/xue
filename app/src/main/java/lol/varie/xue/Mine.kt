@@ -182,7 +182,7 @@ object Mine {
         }
         levels = map
         entries = es
-        stats = st
+        this.stats = st
         words = nWords
         answered = nAnswered
     }
