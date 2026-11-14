@@ -17,7 +17,9 @@ import android.text.format.DateUtils
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.text.InputType
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -30,6 +32,8 @@ class MainActivity : Activity() {
     private lateinit var enable: Button
     private lateinit var data: TextView
     private lateinit var apps: TextView
+    private lateinit var mine: TextView
+    private lateinit var codeIn: EditText
     private var dp = 1f
     private var dark = false
     private val tick = object : Runnable {
@@ -53,7 +57,7 @@ class MainActivity : Activity() {
             setPadding((20 * dp).toInt(), (28 * dp).toInt(), (20 * dp).toInt(), (28 * dp).toInt())
         }
         col.addView(text("学", 34f, bold = true))
-        col.addView(text("Marks the Chinese characters on screen, in any app, by how common they are (ƒ).", 15f, muted()))
+        col.addView(text("Marks the Chinese characters on screen, in any app: yours by your level, the rest by how common they are (ƒ).", 15f, muted()))
 
         col.addView(heading("Service"))
         status = text("", 15f)
@@ -80,9 +84,33 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.SHOW, on).apply() }
         })
 
-        col.addView(heading("Colours: ƒ, how common"))
-        col.addView(Legend(this, dark))
-        col.addView(text("F1 commonest … F5 rarest. Characters missing from the list count as F5.", 13f, muted()))
+        col.addView(heading("Your list"))
+        codeIn = EditText(this).apply {
+            hint = "List code or link from varie.lol/h"
+            setText(Mine.code(this@MainActivity) ?: "")
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            isSingleLine = true
+            setTextColor(fg())
+            setHintTextColor(muted())
+        }
+        col.addView(codeIn)
+        col.addView(LinearLayout(this).apply {
+            addView(button("Save") { saveCode() })
+            addView(button("Sync now") { sync() }.apply {
+                (layoutParams as LinearLayout.LayoutParams).leftMargin = (8 * dp).toInt()
+            })
+        })
+        mine = text("", 14f)
+        col.addView(mine)
+
+        col.addView(heading("Colours"))
+        col.addView(text("Yours: your level, how often you get it wrong", 13f, muted()))
+        col.addView(Legend(this, dark, listOf("New", "L1", "L2", "L3", "L4", "L5"), null) { Palette.level(it, dark) })
+        col.addView(text("Every other character: ƒ, how common", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
+        col.addView(Legend(this, dark, listOf("F1", "F2", "F3", "F4", "F5"), listOf("的", "们", "习", "璀", "璨")) {
+            Palette.freq(it + 1, dark)
+        })
+        col.addView(text("F1 commonest … F5 rarest. Characters missing from the frequency list count as F5.", 13f, muted()))
 
         col.addView(heading("Data"))
         data = text("", 14f)
@@ -99,7 +127,11 @@ class MainActivity : Activity() {
         ).apply { setPadding(0, (24 * dp).toInt(), 0, 0) })
 
         setContentView(ScrollView(this).apply { addView(col) })
-        Thread { if (!Freq.loaded) Freq.load(applicationContext); ui.post { refresh() } }.start()
+        Thread {
+            if (!Freq.loaded) Freq.load(applicationContext)
+            Mine.load(applicationContext)
+            ui.post { refresh() }
+        }.start()
     }
 
     override fun onResume() {
@@ -121,6 +153,22 @@ class MainActivity : Activity() {
         data.text = if (!Freq.loaded) "Loading…" else
             "%,d characters with ƒ, %s copy".format(Freq.size, if (Freq.fromDownload) "downloaded" else "bundled")
 
+        val code = Mine.code(this)
+        mine.text = when {
+            code == null -> "Not set. In the quiz, your list's code is in its address (…/list/CODE.txt); type the code or paste the link."
+            Mine.syncedAt == 0L -> Mine.error?.let { "$code: $it" } ?: "$code: not synced yet"
+            else -> buildString {
+                append("$code: ${Mine.words} words")
+                append(
+                    if (Mine.statsCode == null) ", no results online yet (all New until the quiz saves them)"
+                    else ", results for ${Mine.answered} characters"
+                )
+                append(" · synced ")
+                append(DateUtils.getRelativeTimeSpanString(Mine.syncedAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS))
+                Mine.error?.let { append("\nLast try: $it") }
+            }
+        }
+
         val list = Stats.snapshot()
         apps.text = if (list.isEmpty()) {
             "None yet. Open an app with Chinese text, then come back."
@@ -133,6 +181,33 @@ class MainActivity : Activity() {
             }
             "${a.pkg}\n  $verdict: ${a.withBoxes}/${a.blocks} text blocks, ${a.chars} chars marked, ${a.scanMs} ms · $ago"
         }
+    }
+
+    private fun saveCode() {
+        val raw = codeIn.text.toString()
+        val prefs = Prefs.get(this)
+        if (raw.isBlank()) {
+            prefs.edit().remove(Prefs.LIST_CODE).apply()
+            Thread { Mine.clear(applicationContext); ui.post { refresh(); XueService.running?.refresh() } }.start()
+            return
+        }
+        val code = Mine.extractCode(raw)
+        if (code == null) {
+            mine.text = "That isn't a list code: 8 letters/digits like AB12CD34, or a link with one."
+            return
+        }
+        codeIn.setText(code)
+        // The service, when on, syncs on this change itself; sync here too so the screen updates when it's off.
+        prefs.edit().putString(Prefs.LIST_CODE, code).apply()
+        sync()
+    }
+
+    private fun sync() {
+        mine.text = "Syncing…"
+        Thread {
+            Mine.sync(applicationContext)
+            ui.post { refresh(); XueService.running?.refresh() }
+        }.start()
     }
 
     private fun update() {
@@ -167,10 +242,15 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = (4 * dp).toInt() }
     }
 
-    /** F1 … F5 drawn the way the layer draws them: a sample character with its underline. */
-    private class Legend(context: Context, private val dark: Boolean) : View(context) {
+    /** Swatches drawn the way the layer draws them: an underline, with a sample character when given. */
+    private class Legend(
+        context: Context,
+        dark: Boolean,
+        private val labels: List<String>,
+        private val samples: List<String>?,
+        private val colorOf: (Int) -> Int,
+    ) : View(context) {
         private val dp = resources.displayMetrics.density
-        private val samples = listOf("的", "们", "习", "璀", "璨")
         private val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 26 * dp
             textAlign = Paint.Align.CENTER
@@ -186,20 +266,22 @@ class MainActivity : Activity() {
             strokeCap = Paint.Cap.ROUND
             strokeWidth = 3 * dp
         }
+        private val lineY = (if (samples != null) 38 else 8) * dp
 
         init {
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, (64 * dp).toInt())
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, ((if (samples != null) 64 else 36) * dp).toInt())
         }
 
         override fun onDraw(canvas: Canvas) {
-            val cell = width / 5f
-            for (i in 0 until 5) {
+            val n = labels.size
+            val cell = width / n.toFloat()
+            for (i in 0 until n) {
                 val cx = cell * i + cell / 2
-                canvas.drawText(samples[i], cx, 30 * dp, glyph)
-                line.color = Palette.freq(i + 1, dark)
+                samples?.let { canvas.drawText(it[i], cx, 30 * dp, glyph) }
+                line.color = colorOf(i)
                 line.alpha = 220
-                canvas.drawLine(cx - 10 * dp, 38 * dp, cx + 10 * dp, 38 * dp, line)
-                canvas.drawText("F${i + 1}", cx, 58 * dp, label)
+                canvas.drawLine(cx - 10 * dp, lineY, cx + 10 * dp, lineY, line)
+                canvas.drawText(labels[i], cx, lineY + 20 * dp, label)
             }
         }
     }

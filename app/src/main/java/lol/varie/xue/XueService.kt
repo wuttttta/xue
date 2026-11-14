@@ -21,7 +21,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 
 /**
  * Reads the text on screen (any app), finds the Chinese characters and their boxes, and draws a mark under each
- * on a see-through layer. Step 1 of the plan: colour by frequency (ƒ).
+ * on a see-through layer: your characters by your level (warm colours), the rest by frequency (ƒ, blue).
  */
 class XueService : AccessibilityService() {
 
@@ -49,9 +49,12 @@ class XueService : AccessibilityService() {
     private var lastScan = 0L
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
-        if (key == Prefs.SHOW) {
-            show = p.getBoolean(Prefs.SHOW, true)
-            if (show) requestScan() else main.post { layer?.setMarks(emptyList()) }
+        when (key) {
+            Prefs.SHOW -> {
+                show = p.getBoolean(Prefs.SHOW, true)
+                if (show) requestScan() else main.post { layer?.setMarks(emptyList()) }
+            }
+            Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
 
@@ -64,7 +67,9 @@ class XueService : AccessibilityService() {
         addLayer()
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
+            Mine.load(this)
         }
+        workerHandler.post(syncMine)
         requestScan()
     }
 
@@ -112,6 +117,20 @@ class XueService : AccessibilityService() {
         worker.quitSafely()
         super.onDestroy()
     }
+
+    /** Your list and results: fetched when stale, checked again every few minutes while the service runs. */
+    private val syncMine = object : Runnable {
+        override fun run() {
+            if (Mine.code(this@XueService) != null && Mine.stale()) {
+                Mine.sync(this@XueService)
+                requestScan()
+            }
+            workerHandler.postDelayed(this, 5 * 60 * 1000L)
+        }
+    }
+
+    /** Redraws after the settings screen changed something. */
+    fun refresh() = requestScan()
 
     /** Coalesces events: at most one scan every MIN_INTERVAL_MS, always one after the last event. */
     private fun requestScan() {
@@ -230,7 +249,10 @@ class XueService : AccessibilityService() {
             val key = (r.left.toInt().toLong() shl 32) or (r.top.toInt().toLong() and 0xffffffffL)
             if (!s.seen.add(key)) continue
             s.chars++
-            s.out.add(Mark(r.left, r.top, r.right, r.bottom, Palette.freq(Freq.level(cp), s.dark)))
+            // Yours in your level's colour (warm), every other character by ƒ (blue).
+            val mine = Mine.level(cp)
+            val color = if (mine >= 0) Palette.level(mine, s.dark) else Palette.freq(Freq.level(cp), s.dark)
+            s.out.add(Mark(r.left, r.top, r.right, r.bottom, color))
         }
     }
 }

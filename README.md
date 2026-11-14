@@ -1,11 +1,12 @@
 # 学 (xue)
 
-An Android app that marks the Chinese characters on screen, in any app, with a light underline coloured by
-how common each character is (ƒ, F1 commonest … F5 rarest). Companion to the quiz at
-[varie.lol/h](https://varie.lol/h/), with the same colours.
+An Android app that marks the Chinese characters on screen, in any app, with a light underline. Characters in
+your list get your level's colour from the quiz at [varie.lol/h](https://varie.lol/h/) (warm: New grey, L1
+yellow … L5 dark red, by how often you get them wrong); every other character gets a blue by how common it is
+(ƒ, F1 commonest … F5 rarest). Same colours as the quiz.
 
-Status: **step 1** of the plan (accessibility service + frequency layer). Next: your own levels from the quiz,
-a "look" mode with the quiz card on a tap, and OCR for text in images.
+Status: steps 1–2 of the plan (accessibility service, frequency layer, your levels). Next: a "look" mode with
+the quiz card on a tap, and OCR for text in images.
 
 ## Install
 
@@ -17,7 +18,8 @@ a "look" mode with the quiz card on a tap, and OCR for text in images.
 2. Open 学 → **Turn on in accessibility settings** → Installed apps / Downloaded apps → **学 marks** → on.
    - Android 13+: if the switch is greyed out ("restricted setting"), open **App info → ⋮ → Allow restricted
      settings**, then try again.
-3. Open a Chinese page in Chrome. The settings screen lists every app seen and whether it gives
+3. Under **Your list**, type your list's code (or paste its link, `…/h/list/CODE.txt`) and tap **Save**.
+4. Open a Chinese page in Chrome. The settings screen lists every app seen and whether it gives
    per-character boxes.
 
 The marks never take a touch: everything under them works as usual. Turn them off with the **Show marks**
@@ -25,11 +27,19 @@ switch, or turn the service off in Accessibility.
 
 Sideload only: Google Play restricts accessibility services outside disability tools.
 
+## Your list and levels
+
+The app reads (never writes) two pastes on [pastebox](https://paste.varie.lol): your word list, by the code you
+type, and your quiz results, found through the list's `# stats: <code>` header line, which the quiz writes. Each
+character of a listed word is yours; its level is computed as in the quiz from its last answers: none yet → New,
+else `min(5, 1 + floor(share wrong × 5))`. Results kept for whole words don't colour single characters.
+The app syncs every 15 minutes while it runs, or on **Sync now**, and keeps the last copy for offline use.
+
 ## Privacy
 
 The service reads the text of the app in front of you only to find Chinese characters and where they are.
-Nothing is stored or sent; the only network call is the **Update** button, which downloads the public
-frequency file from varie.lol/h.
+Nothing it reads is stored or sent. Network calls: reading your list and results from paste.varie.lol, and the
+**Update** button, which downloads the public frequency file from varie.lol/h.
 
 ## Build
 
