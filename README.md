@@ -9,7 +9,10 @@ a "look" mode with the quiz card on a tap, and OCR for text in images.
 
 ## Install
 
-1. On the phone, download [`xue.apk` from the latest build](https://github.com/wuttttta/xue/releases/download/latest/xue.apk)
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/wuttttta/xue)
+
+1. With [Obtainium](https://github.com/ImranR98/Obtainium) on the phone, tap the button above: it adds the app and
+   keeps it updated from this repo's releases. Or download [`xue.apk` from the latest release](https://github.com/wuttttta/xue/releases/latest/download/xue.apk)
    and install it (allow installing from your browser when asked).
 2. Open 学 → **Turn on in accessibility settings** → Installed apps / Downloaded apps → **学 marks** → on.
    - Android 13+: if the switch is greyed out ("restricted setting"), open **App info → ⋮ → Allow restricted
@@ -31,10 +34,10 @@ frequency file from varie.lol/h.
 ## Build
 
 The Android build tools don't run on the dev machine (a Raspberry Pi), so builds run on GitHub Actions
-(`.github/workflows/build.yml`): every push to `main` builds a debug APK and publishes it as the `latest` release.
+(`.github/workflows/build.yml`): every push to `main` builds a debug APK and publishes it as release `v0.1.<run number>`.
 
 Each build is signed with the runner's throwaway debug key unless these repo secrets are set, so without them
-uninstall the old app before installing a new build:
+an update fails (in Obtainium too) until the old app is uninstalled:
 `XUE_KEYSTORE_BASE64` (base64 of a `.jks`), `XUE_KEYSTORE_PASSWORD`, `XUE_KEY_ALIAS`.
 
 ## Data and credits
