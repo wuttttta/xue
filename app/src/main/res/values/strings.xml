@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">学</string>
+    <string name="service_label">学 marks</string>
+    <string name="service_description">Marks the Chinese characters on screen with a colour by how common they are (ƒ). It reads the text of the app in front of you only to find Chinese characters and where they are; nothing leaves the phone.</string>
+</resources>
