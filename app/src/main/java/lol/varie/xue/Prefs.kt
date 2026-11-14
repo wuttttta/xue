@@ -11,6 +11,8 @@ object Prefs {
     const val SYNCED_AT = "synced_at"
     /** Tap mode: a plain tap on a character opens its panel (Android 13+, experimental; off until switched on). */
     const val TAP = "tap"
+    /** OCR mode: also read characters in images, video and games from screenshots (Android 11+; off by default). */
+    const val OCR = "ocr"
     /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
     const val BUTTON = "button"
     /** Where the floating look button was left. */

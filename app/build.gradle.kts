@@ -13,6 +13,8 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "0.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+        // Phones only: keeps the OCR library's native code to the two ARM builds.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     // A fixed key from GitHub secrets, when present, so each new build installs over the last one.
@@ -43,4 +45,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    // OCR mode: on-device Chinese text recognition, model bundled in the APK (works offline).
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 }

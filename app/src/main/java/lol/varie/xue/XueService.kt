@@ -51,6 +51,12 @@ class XueService : AccessibilityService() {
     private var tap: TapMode? = null
     @Volatile private var tapOn = false
     @Volatile private var lastScrollAt = 0L
+    private var ocr: OcrMode? = null
+    /** Marks from the accessibility text, and from OCR; drawn together. */
+    private var textMarks: List<Mark> = emptyList()
+    private var ocrMarks: List<Mark> = emptyList()
+    /** What OCR mode is doing, for the settings screen ("" when off). */
+    val ocrStatus: String get() = ocr?.status.orEmpty()
     /** Tap mode is on and Android has granted it. */
     val tapActive: Boolean get() = tap?.active == true
     val isLooking: Boolean get() = looking
@@ -71,6 +77,7 @@ class XueService : AccessibilityService() {
                 button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
             }
             Prefs.TAP -> main.post { applyTapMode() }
+            Prefs.OCR -> main.post { applyOcr() }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
@@ -85,6 +92,7 @@ class XueService : AccessibilityService() {
         addButton()
         layer?.drawMarks = show
         applyTapMode()
+        applyOcr()
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
             Mine.load(this)
@@ -205,6 +213,43 @@ class XueService : AccessibilityService() {
         requestScan()
     }
 
+    /** OCR mode on or off, as set in 学's settings or its tile (Android 11+). */
+    private fun applyOcr() {
+        if (Build.VERSION.SDK_INT < 30) return
+        if (prefs.getBoolean(Prefs.OCR, false)) {
+            val o = ocr ?: OcrMode(this, workerHandler) { chars -> main.post { setOcr(chars) } }.also { ocr = it }
+            o.start()
+        } else {
+            ocr?.stop()
+        }
+    }
+
+    /** Characters read by OCR, coloured like the others; never a link (a tap on one opens the panel). */
+    private fun setOcr(chars: List<OcrChar>) {
+        val dark = Palette.isDark(this)
+        ocrMarks = chars.map { c ->
+            val mine = Mine.level(c.cp)
+            Mark(
+                c.box.left, c.box.top, c.box.right, c.box.bottom, c.cp,
+                under = Palette.freq(Freq.level(c.cp), dark),
+                high = if (mine >= 0) Palette.level(mine, dark) else null,
+                clickable = false,
+            )
+        }
+        publish()
+    }
+
+    /** Draws text marks plus the OCR marks that aren't already on a text mark (text gives the better boxes). */
+    private fun publish() {
+        val all = if (ocrMarks.isEmpty()) textMarks else textMarks + ocrMarks.filter { o ->
+            val cx = (o.left + o.right) / 2
+            val cy = (o.top + o.bottom) / 2
+            textMarks.none { cx >= it.left && cx <= it.right && cy >= it.top && cy <= it.bottom }
+        }
+        layer?.setMarks(all)
+        if (Build.VERSION.SDK_INT >= 33) tap?.setMarks(all)
+    }
+
     private fun openPanel(cp: Int) {
         startActivity(
             Intent(this, PanelActivity::class.java)
@@ -214,7 +259,13 @@ class XueService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) lastScrollAt = SystemClock.uptimeMillis()
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                lastScrollAt = SystemClock.uptimeMillis()
+                ocr?.invalidate()
+            }
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> ocr?.invalidate()
+        }
         if (show || looking || tapOn) requestScan()
     }
 
@@ -229,6 +280,7 @@ class XueService : AccessibilityService() {
     override fun onDestroy() {
         running = null
         if (Build.VERSION.SDK_INT >= 33) tap?.stop()
+        if (Build.VERSION.SDK_INT >= 30) ocr?.close()
         if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         layer?.let { runCatching { wm?.removeView(it) } }
         button?.let { runCatching { wm?.removeView(it) } }
@@ -273,8 +325,8 @@ class XueService : AccessibilityService() {
             return
         }
         main.post {
-            layer?.setMarks(marks)
-            if (Build.VERSION.SDK_INT >= 33) tap?.setMarks(marks)
+            textMarks = marks
+            publish()
         }
     }
 

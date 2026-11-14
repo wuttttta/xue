@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var mine: TextView
     private lateinit var codeIn: EditText
     private var tapStatus: TextView? = null
+    private var ocrStatus: TextView? = null
     private var dp = 1f
     private var dark = false
     private val tick = object : Runnable {
@@ -114,6 +115,34 @@ class MainActivity : Activity() {
             13f, muted()
         ))
 
+        if (Build.VERSION.SDK_INT >= 30) {
+            col.addView(heading("Images and video (OCR)"))
+            col.addView(Switch(this).apply {
+                text = "Read characters in images"
+                textSize = 16f
+                setTextColor(fg())
+                isChecked = prefs.getBoolean(Prefs.OCR, false)
+                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
+                setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.OCR, on).apply() }
+            })
+            col.addView(text(
+                "An extra mode: 学 takes a screenshot every ${OcrMode.EVERY_MS / 1000.0} s and after each scroll, and reads " +
+                    "the Chinese in pictures, video and games on the phone (offline). Their characters get the same " +
+                    "marks and open the same card. Uses more battery: turn it on when you need it, with the " +
+                    "\"学 OCR\" Quick Settings tile.", 13f, muted()
+            ))
+            ocrStatus = text("", 13f).also { col.addView(it) }
+            if (Build.VERSION.SDK_INT >= 33) {
+                col.addView(button("Add the 学 OCR tile") {
+                    getSystemService(android.app.StatusBarManager::class.java).requestAddTileService(
+                        android.content.ComponentName(this, OcrTile::class.java), "学 OCR",
+                        android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_ocr), mainExecutor,
+                    ) { }
+                })
+            }
+        }
+
+        col.addView(heading("Display"))
         col.addView(Switch(this).apply {
             text = "Show marks"
             textSize = 16f
@@ -209,6 +238,15 @@ class MainActivity : Activity() {
                 else -> "Tap mode is waiting for Android: turn \"学 marks\" off and on again in Accessibility settings."
             }
             t.setTextColor(if (XueService.running?.tapActive == true) Palette.freq(3, dark) else fg())
+        }
+
+        ocrStatus?.let { t ->
+            val want = Prefs.get(this).getBoolean(Prefs.OCR, false)
+            t.text = when {
+                !want -> ""
+                !on -> "OCR starts when the service is on."
+                else -> XueService.running?.ocrStatus?.takeIf { it.isNotEmpty() }?.let { "● $it" } ?: "Starting…"
+            }
         }
 
         val code = Mine.code(this)
