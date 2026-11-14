@@ -29,7 +29,10 @@ jobs:
           KS: ${{ secrets.XUE_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > "$RUNNER_TEMP/xue.p12"
+            printf '%s' "$KS" | tr -d ' \r\n\t' | base64 -d > "$RUNNER_TEMP/xue.p12"
+            # Size and hash only (not secret), to compare with the keystore on the dev machine.
+            echo "keystore: $(wc -c < "$RUNNER_TEMP/xue.p12") bytes, sha256 $(sha256sum "$RUNNER_TEMP/xue.p12" | cut -c1-16)"
+            echo "secret length: ${#KS} characters"
             echo "XUE_KEYSTORE_FILE=$RUNNER_TEMP/xue.p12" >> "$GITHUB_ENV"
             echo "Signing with the fixed key"
           else
