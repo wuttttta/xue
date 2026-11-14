@@ -18,7 +18,8 @@ the quiz card on a tap, and OCR for text in images.
 2. Open 学 → **Turn on in accessibility settings** → Installed apps / Downloaded apps → **学 marks** → on.
    - Android 13+: if the switch is greyed out ("restricted setting"), open **App info → ⋮ → Allow restricted
      settings**, then try again.
-3. Under **Your list**, type your list's code (or paste its link, `…/h/list/CODE.txt`) and tap **Save**.
+3. Under **Your list**, paste your list's link and tap **Save**. In the quiz it's under the person icon → account →
+   share **Raw text** (`…/h/list/CODE.txt`) or **Word list** (`…/h/#pick=CODE`); the code alone works too.
 4. Open a Chinese page in Chrome. The settings screen lists every app seen and whether it gives
    per-character boxes.
 

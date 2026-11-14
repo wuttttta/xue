@@ -19,7 +19,7 @@ object Mine {
     const val PASTE = "https://paste.varie.lol"
     private const val CODE = "(?:[A-Z0-9]{8}|[A-Za-z0-9]{10})"
     private val WHOLE = Regex("^$CODE$")
-    private val IN_LINK = Regex("(?:/list/|paste\\.varie\\.lol/|paste\\.chatstats\\.wtf/)($CODE)(?:\\.txt)?(?![A-Za-z0-9])")
+    private val IN_LINK = Regex("(?:/list/|[#&?]pick=|paste\\.varie\\.lol/|paste\\.chatstats\\.wtf/)($CODE)(?:\\.txt)?(?![A-Za-z0-9])")
     private val STATS_HEADER = Regex("^#\\s*stats:\\s*($CODE)\\s*$")
     private const val LIST_FILE = "list.txt"
     private const val STATS_FILE = "stats.txt"
@@ -36,7 +36,7 @@ object Mine {
     /** Level 0..5 if the character is yours, else -1. */
     fun level(codePoint: Int): Int = levels[codePoint] ?: -1
 
-    /** A code from what the user typed: the code itself, or a link with it. */
+    /** A code from what the user typed: the code itself, or a link with it (…/h/list/CODE.txt, …/h/#pick=CODE). */
     fun extractCode(input: String): String? {
         val s = input.trim()
         if (WHOLE.matches(s)) return s

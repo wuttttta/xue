@@ -155,12 +155,12 @@ class MainActivity : Activity() {
 
         val code = Mine.code(this)
         mine.text = when {
-            code == null -> "Not set. In the quiz, your list's code is in its address (…/list/CODE.txt); type the code or paste the link."
+            code == null -> "Not set. In the quiz: person icon → account → share \"Raw text\" or \"Word list\"; paste that link here, or type the code in it."
             Mine.syncedAt == 0L -> Mine.error?.let { "$code: $it" } ?: "$code: not synced yet"
             else -> buildString {
                 append("$code: ${Mine.words} words")
                 append(
-                    if (Mine.statsCode == null) ", no results online yet (all New until the quiz saves them)"
+                    if (Mine.statsCode == null) ", no results online yet (all New until you answer once in the quiz)"
                     else ", results for ${Mine.answered} characters"
                 )
                 append(" · synced ")
