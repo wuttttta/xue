@@ -200,10 +200,6 @@ class XueService : AccessibilityService() {
                 markAt = { x, y -> layer?.markAt(x, y) },
                 scrolling = { SystemClock.uptimeMillis() - lastScrollAt < 400 },
                 onTap = ::openPanel,
-                onGiveUp = { msg ->
-                    prefs.edit().putBoolean(Prefs.TAP, false).apply()
-                    android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
-                },
             ).also { tap = it }
             t.start()
         } else {

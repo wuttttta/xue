@@ -24,6 +24,10 @@ import kotlin.math.abs
  * - A touch that starts on a character comes to 学. A quick tap without moving opens the panel. Anything else
  *   (moving, holding, a second finger, a scroll still going) is handed back while the finger is still down
  *   (requestDelegating), so the app sees the scroll or the long press, only slightly late.
+ *
+ * Android still sends 学 the first event of a touch it is already passing through (the controller is then in
+ * STATE_DELEGATING): those are ignored, and nothing is ever handed back twice. (Doing so made requestDelegating
+ * throw, and counting those as failures switched tap mode off after a few touches: fixed in 0.1.15.)
  */
 @TargetApi(33)
 class TapMode(
@@ -34,7 +38,6 @@ class TapMode(
     /** True while something on screen is scrolling (a tap then only stops the scroll). */
     private val scrolling: () -> Boolean,
     private val onTap: (Int) -> Unit,
-    private val onGiveUp: (String) -> Unit,
 ) {
     private val slop = ViewConfiguration.get(service).scaledTouchSlop
     private val density = service.resources.displayMetrics.density
@@ -43,7 +46,6 @@ class TapMode(
     private var down = false
     private var downX = 0f
     private var downY = 0f
-    private var failures = 0
     private var looking = false
     private var marks: List<Mark> = emptyList()
     var active = false; private set
@@ -81,7 +83,6 @@ class TapMode(
             c.registerCallback(null, callback)
             ctl = c
             active = true
-            failures = 0
             updateRegion()
             true
         } catch (t: Throwable) {
@@ -135,11 +136,23 @@ class TapMode(
         runCatching { service.setTouchExplorationPassthroughRegion(Display.DEFAULT_DISPLAY, r) }
     }
 
+    /** Android is already passing this touch to the app (passthrough region) or exploring it: not 学's to decide. */
+    private fun notOurs(): Boolean = when (ctl?.state) {
+        TouchInteractionController.STATE_DELEGATING,
+        TouchInteractionController.STATE_TOUCH_EXPLORING,
+        TouchInteractionController.STATE_DRAGGING -> true
+        else -> false
+    }
+
     private fun handle(e: MotionEvent) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 main.removeCallbacks(holdTooLong)
                 down = true
+                if (notOurs()) {
+                    held = null
+                    return
+                }
                 val m = if (scrolling()) null else markAt(e.x, e.y)
                 if (m == null || m.clickable) {
                     // Not on a character after all (the screen moved since the last scan): give it back now.
@@ -168,10 +181,7 @@ class TapMode(
                 down = false
                 val m = held
                 held = null
-                if (m != null) {
-                    failures = 0
-                    onTap(m.cp)
-                }
+                if (m != null) onTap(m.cp)
             }
             MotionEvent.ACTION_CANCEL -> {
                 main.removeCallbacks(holdTooLong)
@@ -181,16 +191,13 @@ class TapMode(
         }
     }
 
-    /** Hands the current touch back to the app. Only while a finger is down: after it lifts there is nothing to hand. */
+    /**
+     * Hands the current touch back to the app. Only while a finger is down (after it lifts there is nothing to hand),
+     * and only once: if Android already passes it on, there is nothing to do. A refusal is harmless and ignored.
+     */
     private fun delegate() {
         val c = ctl ?: return
-        try {
-            c.requestDelegating()
-        } catch (t: Throwable) {
-            if (++failures >= 5) {
-                stop()
-                onGiveUp("Tap mode turned itself off: ${t.message ?: t.javaClass.simpleName}")
-            }
-        }
+        if (notOurs()) return
+        runCatching { c.requestDelegating() }
     }
 }
