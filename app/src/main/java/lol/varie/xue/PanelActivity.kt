@@ -28,6 +28,7 @@ class PanelActivity : Activity() {
     }
 
     private lateinit var web: WebView
+    private lateinit var strip: MineStrip
     private var loaded = false
     /** A character asked for while the page was signing in, shown when that is done. */
     private var after: String? = null
@@ -90,6 +91,12 @@ class PanelActivity : Activity() {
                 }
             }
         }
+        // Your data for the character, from the app (the quiz below may not be signed in).
+        strip = MineStrip(this, dark)
+        sheet.addView(strip, LinearLayout.LayoutParams(MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        sheet.addView(View(this).apply {
+            setBackgroundColor(if (dark) Color.rgb(0x2a, 0x2e, 0x34) else Color.rgb(0xe3, 0xe6, 0xea))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, (1 * dp).toInt().coerceAtLeast(1)))
         sheet.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         val h = (resources.displayMetrics.heightPixels * 0.72f).toInt()
@@ -106,6 +113,9 @@ class PanelActivity : Activity() {
 
     private fun open(intent: Intent?) {
         val ch = intent?.getStringExtra(EXTRA_CHAR) ?: return
+        if (!Freq.loaded) Freq.load(applicationContext)
+        if (Mine.words == 0) Mine.load(applicationContext)
+        strip.show(ch)
         val prefs = Prefs.get(this)
         val sync = prefs.getString(Prefs.PENDING_SYNC, null)
         if (sync != null) {

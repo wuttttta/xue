@@ -33,6 +33,37 @@ object Mine {
     @Volatile var syncedAt = 0L; private set
     @Volatile var error: String? = null; private set
 
+    /** A word of your list: when it was added (as the list file writes it) and its meaning. */
+    class Entry(val word: String, val added: String, val meaning: String)
+
+    /** A result line: right and wrong answers in all, and the last answers (1 right, 0 wrong, newest last). */
+    class Stat(val right: Int, val wrong: Int, val last: String) {
+        val level: Int get() = if (last.isEmpty()) 0 else {
+            val w = last.count { it == '0' }.toDouble() / last.length
+            minOf(5, 1 + Math.floor(w * 5 + 1e-9).toInt())
+        }
+        val wrongShare: Double get() = if (last.isEmpty()) 0.0 else last.count { it == '0' }.toDouble() / last.length
+    }
+
+    /** What the panel shows about a character: its own results, and the list words it is in. */
+    class Info(val level: Int, val stat: Stat?, val words: List<Entry>)
+
+    @Volatile private var entries: List<Entry> = emptyList()
+    @Volatile private var stats: Map<String, Stat> = emptyMap()
+
+    /** Results of a list item (character or word), if any. */
+    fun stat(item: String): Stat? = stats[item]
+
+    /** Your data for a character, or null if it isn't yours. */
+    fun info(ch: String): Info? {
+        if (ch.isEmpty()) return null
+        val lv = level(ch.codePointAt(0))
+        if (lv < 0) return null
+        // The word that is the character itself first, then the longer words containing it.
+        val ws = entries.filter { it.word.contains(ch) }.sortedBy { if (it.word == ch) 0 else 1 }
+        return Info(lv, stats[ch], ws)
+    }
+
     /** Level 0..5 if the character is yours, else -1. */
     fun level(codePoint: Int): Int = levels[codePoint] ?: -1
 
@@ -115,15 +146,19 @@ object Mine {
 
     private fun parse(list: String?, stats: String?) {
         val map = HashMap<Int, Int>()
+        val es = ArrayList<Entry>()
+        val st = HashMap<String, Stat>()
         var nWords = 0
         // Every character of a listed word is yours; New until the results say otherwise.
         list?.lineSequence()?.forEach { raw ->
             val line = raw.trim()
             if (line.isEmpty() || line.startsWith("#")) return@forEach
             val p = line.split('|').map { it.trim() }
-            val word = if (p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))) p.getOrNull(1) else p[0]
+            val dated = p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))
+            val word = if (dated) p.getOrNull(1) else p[0]
             if (word.isNullOrEmpty()) return@forEach
             nWords++
+            es.add(Entry(word, if (dated) p[0] else "", p.getOrNull(2).orEmpty()))
             word.codePoints().forEach { cp ->
                 if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) map.putIfAbsent(cp, 0)
             }
@@ -135,17 +170,19 @@ object Mine {
             if (line.isEmpty() || line.startsWith("#")) return@forEach
             val p = line.split('|').map { it.trim() }
             val item = p[0]
-            // Levels are per character; results kept for whole words don't colour single characters.
-            if (item.isEmpty() || item.codePointCount(0, item.length) != 1) return@forEach
+            if (item.isEmpty()) return@forEach
             val h = p.getOrNull(3).orEmpty().filter { it == '0' || it == '1' }
-            val lv = if (h.isEmpty()) 0 else {
-                val wrong = h.count { it == '0' }.toDouble() / h.length
-                minOf(5, 1 + Math.floor(wrong * 5 + 1e-9).toInt())
-            }
+            val s = Stat(p.getOrNull(1)?.toIntOrNull() ?: 0, p.getOrNull(2)?.toIntOrNull() ?: 0, h)
+            st[item] = s
+            // Levels are per character; results kept for whole words don't colour single characters
+            // (the panel shows them with the word).
+            if (item.codePointCount(0, item.length) != 1) return@forEach
             if (h.isNotEmpty()) nAnswered++
-            map[item.codePointAt(0)] = lv
+            map[item.codePointAt(0)] = s.level
         }
         levels = map
+        entries = es
+        stats = st
         words = nWords
         answered = nAnswered
     }
