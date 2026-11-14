@@ -64,7 +64,6 @@ class XueService : AccessibilityService() {
             Prefs.BUTTON -> main.post {
                 button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
             }
-            }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
