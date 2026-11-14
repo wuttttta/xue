@@ -6,4 +6,14 @@
         <item name="android:statusBarColor">#ffffff</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <!-- The character panel: a sheet over whatever app is open. -->
+    <style name="Theme.Xue.Panel" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.InputMethod</item>
+    </style>
 </resources>

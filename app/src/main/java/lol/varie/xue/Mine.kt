@@ -19,7 +19,7 @@ object Mine {
     const val PASTE = "https://paste.varie.lol"
     private const val CODE = "(?:[A-Z0-9]{8}|[A-Za-z0-9]{10})"
     private val WHOLE = Regex("^$CODE$")
-    private val IN_LINK = Regex("(?:/list/|[#&?]pick=|paste\\.varie\\.lol/|paste\\.chatstats\\.wtf/)($CODE)(?:\\.txt)?(?![A-Za-z0-9])")
+    private val IN_LINK = Regex("(?:/list/|[#&?](?:pick|sync)=|paste\\.varie\\.lol/|paste\\.chatstats\\.wtf/)($CODE)(?:\\.txt)?(?![A-Za-z0-9])")
     private val STATS_HEADER = Regex("^#\\s*stats:\\s*($CODE)\\s*$")
     private const val LIST_FILE = "list.txt"
     private const val STATS_FILE = "stats.txt"
@@ -36,12 +36,17 @@ object Mine {
     /** Level 0..5 if the character is yours, else -1. */
     fun level(codePoint: Int): Int = levels[codePoint] ?: -1
 
-    /** A code from what the user typed: the code itself, or a link with it (…/h/list/CODE.txt, …/h/#pick=CODE). */
+    /** A code from what the user typed: the code itself, or a link with it (…/h/list/CODE.txt, …/h/#pick=CODE, …/h/#sync=CODE.KEY). */
     fun extractCode(input: String): String? {
         val s = input.trim()
         if (WHOLE.matches(s)) return s
         return IN_LINK.find(s)?.groupValues?.get(1)
     }
+
+    private val SYNC_LINK = Regex("#sync=($CODE\\.[0-9a-f]{64})(?![0-9a-f])")
+
+    /** `CODE.KEY` from the quiz's "Edit list" link, which signs a browser in to the list; null for other input. */
+    fun extractSync(input: String): String? = SYNC_LINK.find(input.trim())?.groupValues?.get(1)
 
     fun code(context: Context): String? = Prefs.get(context).getString(Prefs.LIST_CODE, null)
 

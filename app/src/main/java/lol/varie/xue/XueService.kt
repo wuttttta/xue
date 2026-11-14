@@ -1,6 +1,7 @@
 package lol.varie.xue
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -14,6 +15,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -42,6 +44,10 @@ class XueService : AccessibilityService() {
 
     private var wm: WindowManager? = null
     private var layer: MarkLayer? = null
+    private var layerParams: WindowManager.LayoutParams? = null
+    private var button: LookButton? = null
+    private var buttonParams: WindowManager.LayoutParams? = null
+    private var looking = false
     private lateinit var prefs: SharedPreferences
     @Volatile private var show = true
 
@@ -52,7 +58,14 @@ class XueService : AccessibilityService() {
         when (key) {
             Prefs.SHOW -> {
                 show = p.getBoolean(Prefs.SHOW, true)
-                if (show) requestScan() else main.post { layer?.setMarks(emptyList()) }
+                main.post {
+                    button?.visibility = if (show) View.VISIBLE else View.GONE
+                    if (!show) {
+                        setLooking(false)
+                        layer?.setMarks(emptyList())
+                    }
+                }
+                if (show) requestScan()
             }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
@@ -65,6 +78,7 @@ class XueService : AccessibilityService() {
         show = prefs.getBoolean(Prefs.SHOW, true)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         addLayer()
+        addButton()
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
             Mine.load(this)
@@ -92,10 +106,70 @@ class XueService : AccessibilityService() {
         } else if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
-        val v = MarkLayer(this)
+        val v = MarkLayer(this, ::onPick)
         w.addView(v, lp)
         wm = w
         layer = v
+        layerParams = lp
+    }
+
+    /** The floating 学 button, above the layer: a tap turns look mode on or off, a drag moves it. */
+    private fun addButton() {
+        val w = wm ?: return
+        val prefs = Prefs.get(this)
+        val dm = resources.displayMetrics
+        val b = LookButton(this, onTap = { setLooking(!looking) }, onMove = { dx, dy -> moveButton(dx, dy) }, onDrop = {
+            buttonParams?.let { prefs.edit().putInt(Prefs.BTN_X, it.x).putInt(Prefs.BTN_Y, it.y).apply() }
+        })
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = prefs.getInt(Prefs.BTN_X, dm.widthPixels - b.sizePx - (8 * dm.density).toInt())
+        lp.y = prefs.getInt(Prefs.BTN_Y, (dm.heightPixels * 0.62f).toInt())
+        b.visibility = if (show) View.VISIBLE else View.GONE
+        w.addView(b, lp)
+        button = b
+        buttonParams = lp
+    }
+
+    private fun moveButton(dx: Int, dy: Int) {
+        val lp = buttonParams ?: return
+        val dm = resources.displayMetrics
+        val size = button?.sizePx ?: 0
+        lp.x = (lp.x + dx).coerceIn(0, dm.widthPixels - size)
+        lp.y = (lp.y + dy).coerceIn(0, dm.heightPixels - size)
+        button?.let { runCatching { wm?.updateViewLayout(it, lp) } }
+    }
+
+    /** Look mode: the layer takes touches, so a tap picks a character instead of reaching the app. */
+    private fun setLooking(on: Boolean) {
+        if (looking == on) return
+        looking = on
+        val lp = layerParams ?: return
+        lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        else lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        layer?.let {
+            it.looking = on
+            runCatching { wm?.updateViewLayout(it, lp) }
+        }
+        button?.looking = on
+    }
+
+    /** A tap in look mode: on a character, open its panel; anywhere else, leave look mode. */
+    private fun onPick(cp: Int?) {
+        // The layer covers the panel too, so it must stop taking touches before the panel shows.
+        setLooking(false)
+        if (cp == null) return
+        startActivity(
+            Intent(this, PanelActivity::class.java)
+                .putExtra(PanelActivity.EXTRA_CHAR, String(Character.toChars(cp)))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -104,6 +178,7 @@ class XueService : AccessibilityService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        button?.invalidate()
         requestScan()
     }
 
@@ -113,7 +188,9 @@ class XueService : AccessibilityService() {
         running = null
         if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         layer?.let { runCatching { wm?.removeView(it) } }
+        button?.let { runCatching { wm?.removeView(it) } }
         layer = null
+        button = null
         worker.quitSafely()
         super.onDestroy()
     }
@@ -174,7 +251,8 @@ class XueService : AccessibilityService() {
             if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
             if (w.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
                 val root = w.root
-                if (root != null) {
+                // 学's own screens (settings, the panel) are not marked; they still hide what is under them.
+                if (root != null && root.packageName != packageName) {
                     val t0 = SystemClock.uptimeMillis()
                     val s = Scan(dark, covered, wb)
                     walk(root, 0, s)
@@ -252,7 +330,7 @@ class XueService : AccessibilityService() {
             // Yours in your level's colour (warm), every other character by ƒ (blue).
             val mine = Mine.level(cp)
             val color = if (mine >= 0) Palette.level(mine, s.dark) else Palette.freq(Freq.level(cp), s.dark)
-            s.out.add(Mark(r.left, r.top, r.right, r.bottom, color))
+            s.out.add(Mark(r.left, r.top, r.right, r.bottom, cp, color))
         }
     }
 }

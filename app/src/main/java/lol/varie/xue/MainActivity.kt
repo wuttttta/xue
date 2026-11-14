@@ -75,8 +75,18 @@ class MainActivity : Activity() {
             })
         }
 
+        col.addView(heading("Look up"))
+        col.addView(text(
+            "Tap the floating 学 button, then a character: its card from the quiz opens over the app. " +
+                "A tap anywhere else, or on the button again, goes back to normal. Drag the button to move it.", 14f
+        ))
+        col.addView(text(
+            "The panel's quiz keeps its own sign-in: paste the quiz's \"Edit list\" link under Your list to use your list there.",
+            13f, muted()
+        ))
+
         col.addView(Switch(this).apply {
-            text = "Show marks"
+            text = "Show marks and the 学 button"
             textSize = 16f
             setTextColor(fg())
             isChecked = prefs.getBoolean(Prefs.SHOW, true)
@@ -155,7 +165,7 @@ class MainActivity : Activity() {
 
         val code = Mine.code(this)
         mine.text = when {
-            code == null -> "Not set. In the quiz: person icon → account → share \"Raw text\" or \"Word list\"; paste that link here, or type the code in it."
+            code == null -> "Not set. In the quiz: person icon → account → share \"Edit list\" and paste that link here (it also signs the panel's quiz in to your list). \"Raw text\" or \"Word list\" work too, for the colours only."
             Mine.syncedAt == 0L -> Mine.error?.let { "$code: $it" } ?: "$code: not synced yet"
             else -> buildString {
                 append("$code: ${Mine.words} words")
@@ -197,6 +207,8 @@ class MainActivity : Activity() {
             return
         }
         codeIn.setText(code)
+        // The "Edit list" link also signs the panel's quiz in (once, the next time it opens); its key stays on the phone.
+        Mine.extractSync(raw)?.let { prefs.edit().putString(Prefs.PENDING_SYNC, it).apply() }
         // The service, when on, syncs on this change itself; sync here too so the screen updates when it's off.
         prefs.edit().putString(Prefs.LIST_CODE, code).apply()
         sync()
