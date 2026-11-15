@@ -49,6 +49,8 @@ class PanelActivity : Activity() {
     private var loaded = false
     /** What to do once the page being loaded has finished. */
     private var pending: (() -> Unit)? = null
+    private var signedAt = -1L
+
     /** Loads so far: each one gets its own address, so it really loads. */
     private var loads = 0
 
@@ -154,16 +156,11 @@ class PanelActivity : Activity() {
             dataAt = Mine.syncedAt
             loaded = false
         }
-        val prefs = Prefs.get(this)
-        val sync = prefs.getString(Prefs.PENDING_SYNC, null)
-        if (sync != null) {
-            // Sign the panel's quiz in to the user's list once: the quiz saves the link's code and key itself.
-            prefs.edit().remove(Prefs.PENDING_SYNC).apply()
+        // Signed in since the page was loaded (settings did it in its own WebView): load it again to pick it up.
+        val at = Prefs.get(this).getLong(Prefs.PANEL_AT, 0)
+        if (at != signedAt) {
+            signedAt = at
             loaded = false
-            // Once the page has saved the list, show what was asked for.
-            pending = { web.postDelayed({ go(ch, text) }, 1500) }
-            web.loadUrl(QUIZ + "#sync=" + sync)
-            return
         }
         go(ch, text)
     }
@@ -259,6 +256,8 @@ class PanelActivity : Activity() {
 
     private fun hide() {
         moveTaskToBack(true)
+        // Words just added in the panel: fetch the list again so they get their colour soon.
+        XueService.running?.syncSoon()
     }
 
     @Deprecated("Back hides the sheet; the page stays loaded for the next character.")

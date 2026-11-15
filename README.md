@@ -48,8 +48,9 @@ Status: all four steps of the plan (marks by frequency, your levels, look-up pan
      settings**, then try again.
 3. Under **Your list**, paste your list's link and tap **Save**. In the quiz it's under the person icon → account →
    share **Raw text** (`…/h/list/CODE.txt`) or **Word list** (`…/h/#pick=CODE`); the code alone works too.
-   Paste the **Edit list** link (same panel) instead to also sign the panel's quiz in to your list: it carries
-   your list's edit key, which stays on the phone (it is handed to the panel's quiz once, then forgotten by the app).
+   Paste the **Edit list** link (same panel) instead to also sign the panel's quiz in to your list, at once: words
+   you add in the panel and answers you give there then sync like in Chrome. The link carries your list's edit key,
+   which stays on the phone (the panel's quiz keeps it in its own storage; the app doesn't).
 4. Open a Chinese page in Chrome. The settings screen lists every app seen and whether it gives
    per-character boxes.
 

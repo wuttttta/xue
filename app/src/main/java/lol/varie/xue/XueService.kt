@@ -362,6 +362,18 @@ class XueService : AccessibilityService() {
         }
     }
 
+    /** After the panel closes: the list may have new words, the results new answers (the quiz sends those ~25 s later). */
+    fun syncSoon() {
+        for (delay in longArrayOf(3000, 35000)) {
+            workerHandler.postDelayed({
+                if (Mine.code(this) != null) {
+                    Mine.sync(this)
+                    requestScan()
+                }
+            }, delay)
+        }
+    }
+
     /** Redraws after the settings screen changed something. */
     fun refresh() = requestScan()
 

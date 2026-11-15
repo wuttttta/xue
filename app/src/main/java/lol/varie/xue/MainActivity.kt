@@ -36,6 +36,9 @@ class MainActivity : Activity() {
     private lateinit var codeIn: EditText
     private var tapStatus: TextView? = null
     private var ocrStatus: TextView? = null
+    private lateinit var panelLine: TextView
+    /** Sign-in in progress or its error; null shows the saved state. */
+    private var panelNote: String? = null
     private var dp = 1f
     private var dark = false
     private val tick = object : Runnable {
@@ -204,6 +207,8 @@ class MainActivity : Activity() {
         })
         mine = text("", 14f)
         col.addView(mine)
+        panelLine = text("", 13f)
+        col.addView(panelLine)
 
         col.addView(heading("Colours"))
         col.addView(text("Highlight, on your characters: your level, how often you get it wrong", 13f, muted()))
@@ -286,6 +291,15 @@ class MainActivity : Activity() {
             }
         }
 
+        val pc = PanelSignIn.code(this)
+        panelLine.text = panelNote ?: if (pc != null) {
+            "● Panel signed in to $pc: words you add and answers you give there sync like in Chrome."
+        } else {
+            "Panel not signed in: it shows your data, but words added there stay in the panel. " +
+                "Paste the \"Edit list\" link (with its key) to sign it in."
+        }
+        panelLine.setTextColor(if (pc != null && panelNote == null) Palette.freq(3, dark) else muted())
+
         val code = Mine.code(this)
         mine.text = when {
             code == null -> "Not set. In the quiz: person icon → account → share \"Edit list\" and paste that link here (it also signs the panel's quiz in to your list). \"Raw text\" or \"Word list\" work too (then the panel shows your data but can't add words)."
@@ -330,11 +344,18 @@ class MainActivity : Activity() {
             return
         }
         codeIn.setText(code)
-        // The "Edit list" link also signs the panel's quiz in (once, the next time it opens); its key stays on the phone.
-        Mine.extractSync(raw)?.let { prefs.edit().putString(Prefs.PENDING_SYNC, it).apply() }
         // The service, when on, syncs on this change itself; sync here too so the screen updates when it's off.
         prefs.edit().putString(Prefs.LIST_CODE, code).apply()
         sync()
+        // The "Edit list" link also signs the panel's quiz in, now; its key stays on the phone.
+        Mine.extractSync(raw)?.let { link ->
+            panelNote = "Signing the panel's quiz in…"
+            refresh()
+            PanelSignIn.run(this, link) { err ->
+                panelNote = if (err == null) null else "Couldn't sign the panel in: $err. Paste the link again to retry."
+                refresh()
+            }
+        }
     }
 
     private fun sync() {

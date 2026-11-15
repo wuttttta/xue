@@ -20,8 +20,9 @@ object Prefs {
     /** Where the floating look button was left. */
     const val BTN_X = "btn_x"
     const val BTN_Y = "btn_y"
-    /** A quiz device link (#sync=code.token) waiting to sign the panel's quiz in; cleared once loaded. */
-    const val PENDING_SYNC = "pending_sync"
+    /** The list code the panel's quiz is signed in to (by the "Edit list" link), and when. The key isn't kept here. */
+    const val PANEL_CODE = "panel_code"
+    const val PANEL_AT = "panel_at"
 
     fun get(context: Context): SharedPreferences =
         context.getSharedPreferences("xue", Context.MODE_PRIVATE)
