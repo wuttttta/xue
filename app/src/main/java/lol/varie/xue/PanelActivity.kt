@@ -121,6 +121,17 @@ class PanelActivity : Activity() {
 
         val h = (resources.displayMetrics.heightPixels * 0.72f).toInt()
         root.addView(sheet, FrameLayout.LayoutParams(MATCH_PARENT, h, Gravity.BOTTOM))
+        // Android 15 draws apps under the navigation bar: keep the quiz above it, and above the keyboard.
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bottom = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                insets.getInsets(android.view.WindowInsets.Type.navigationBars() or android.view.WindowInsets.Type.ime()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            sheet.setPadding(0, 0, 0, bottom)
+            insets
+        }
         setContentView(root)
 
         open(intent)
@@ -195,9 +206,15 @@ class PanelActivity : Activity() {
         )
     }
 
-    /** Text from select mode, handed to the quiz the way Android's Share gives it text (its "h-share" cache, ?share=1). */
+    /**
+     * Text from select mode, handed to the quiz the way Android's Share gives it text (its "h-share" cache, ?share=1).
+     * Its Quiz button is set to 句 (the text's sentences), which works even when every word is already in your list;
+     * ‹ next to it switches back to words, and the quiz remembers that (in the panel only).
+     */
     private fun share(text: String) {
-        val js = "caches.open('h-share').then(function(c){ return c.put('text', new Response(${jsString(text)})); })" +
+        val js = "try { var k = 'h.settings.v1', s = JSON.parse(localStorage.getItem(k) || '{}') || {};" +
+            " s.qQuiz = 's'; localStorage.setItem(k, JSON.stringify(s)); } catch (e) {}" +
+            "caches.open('h-share').then(function(c){ return c.put('text', new Response(${jsString(text)})); })" +
             ".then(function(){ location.href = location.pathname + '?share=1'; });"
         if (loaded) {
             web.evaluateJavascript(js, null)
