@@ -101,6 +101,7 @@ class XueService : AccessibilityService() {
             Mine.load(this)
         }
         workerHandler.post(syncMine)
+        workerHandler.postDelayed(heartbeat, 1000)
         requestScan()
     }
 
@@ -443,17 +444,48 @@ class XueService : AccessibilityService() {
     /**
      * [sinceClickable]: how many levels up the nearest clickable ancestor is (1 = the parent). Text in a clickable
      * node, or under one at most 3 levels up, belongs to a link or button: tap mode leaves its taps to the app.
+     *
+     * Children first: some apps (Jetpack Compose cards, React Native) also give a container the joined text of what
+     * is inside it, and report boxes for that copy in the wrong places, which put marks over unrelated text.
+     * A node whose Chinese characters all appear in its descendants' text is such a copy and is skipped.
+     * Returns the Chinese characters of the text in this subtree.
      */
-    private fun walk(node: AccessibilityNodeInfo, depth: Int, sinceClickable: Int, s: Scan) {
-        if (depth > MAX_DEPTH || s.nodes >= MAX_NODES) return
+    private fun walk(node: AccessibilityNodeInfo, depth: Int, sinceClickable: Int, s: Scan): String {
+        if (depth > MAX_DEPTH || s.nodes >= MAX_NODES) return ""
         s.nodes++
-        if (!node.isVisibleToUser) return
-        val text = node.text
-        if (!text.isNullOrEmpty()) markText(node, text.toString(), node.isClickable || sinceClickable <= 3, s)
+        if (!node.isVisibleToUser) return ""
         val next = if (node.isClickable) 1 else sinceClickable + 1
+        val inside = StringBuilder()
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            walk(child, depth + 1, next, s)
+            inside.append(walk(child, depth + 1, next, s))
+        }
+        val text = node.text
+        if (!text.isNullOrEmpty()) {
+            val t = text.toString()
+            val han = hanOf(t)
+            if (han.isNotEmpty()) {
+                val kids = inside.toString()
+                val copy = kids.isNotEmpty() && han.codePoints().allMatch { cp -> kids.contains(String(Character.toChars(cp))) }
+                if (!copy) markText(node, t, node.isClickable || sinceClickable <= 3, s)
+                inside.append(han)
+            }
+        }
+        return inside.toString()
+    }
+
+    private fun hanOf(t: String): String {
+        val b = StringBuilder()
+        t.codePoints().forEach { if (isHan(it)) b.appendCodePoint(it) }
+        return b.toString()
+    }
+
+    /** A rescan every second while the screen is on, for apps that move their content without telling Android. */
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            if ((show || looking || tapOn) && pm?.isInteractive != false) requestScan()
+            workerHandler.postDelayed(this, 1000)
         }
     }
 
