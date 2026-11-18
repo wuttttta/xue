@@ -373,7 +373,7 @@ class MainActivity : Activity() {
         val sb = android.text.SpannableStringBuilder()
         for (cp in a.seen) {
             val start = sb.length
-            sb.appendCodePoint(cp)
+            sb.append(String(Character.toChars(cp)))
             val lv = Mine.level(cp)
             if (lv >= 0) {
                 val c = Palette.level(lv, dark)
