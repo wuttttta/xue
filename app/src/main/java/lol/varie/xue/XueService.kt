@@ -568,6 +568,7 @@ class XueService : AccessibilityService() {
                     Stats.record(
                         root.packageName?.toString() ?: "?",
                         s.blocks, s.withBoxes, s.chars, SystemClock.uptimeMillis() - t0,
+                        s.out.map { it.cp },
                     )
                 }
             }

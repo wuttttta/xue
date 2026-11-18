@@ -31,7 +31,11 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var enable: Button
     private lateinit var data: TextView
-    private lateinit var apps: TextView
+    private lateinit var apps: LinearLayout
+    /** Apps opened in the list (showing their characters). */
+    private val expanded = HashSet<String>()
+    private var appsVersion = -1
+    private var appsAt = 0L
     private lateinit var mine: TextView
     private lateinit var codeIn: EditText
     private var tapStatus: TextView? = null
@@ -227,15 +231,21 @@ class MainActivity : Activity() {
         col.addView(button("Update from varie.lol/h") { update() })
 
         col.addView(heading("Apps seen (character boxes)"))
-        apps = text("", 14f).apply { typeface = Typeface.MONOSPACE }
+        col.addView(text("Tap an app to see the characters 学 has marked in it.", 13f, muted()))
+        apps = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(apps)
-        col.addView(button("Clear") { Stats.clear(); refresh() })
+        col.addView(button("Clear") { Stats.clear(); expanded.clear(); refresh() })
 
         col.addView(text(
             "Frequencies: jieba's dict.txt (MIT), via varie.lol/h. Nothing you read leaves the phone.", 12f, muted()
         ).apply { setPadding(0, (24 * dp).toInt(), 0, 0) })
 
-        setContentView(ScrollView(this).apply { addView(col) })
+        // Android 15 draws apps under the status and navigation bars: pad the page by them.
+        setContentView(ScrollView(this).apply {
+            fitsSystemWindows = true
+            clipToPadding = false
+            addView(col)
+        })
         // The 学 sign in the status bar (and its buttons) is a notification: Android 13+ asks for it once.
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -318,17 +328,69 @@ class MainActivity : Activity() {
             }
         }
 
+        renderApps(false)
+    }
+
+    /**
+     * The apps seen, newest first. Each row opens (tap) to its characters, your own on their level's highlight.
+     * Rebuilt only when something changed (or every 10 s for the "… ago"), so an open list can be read and scrolled.
+     */
+    private fun renderApps(force: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!force && Stats.version == appsVersion && now - appsAt < 10_000) return
+        appsVersion = Stats.version
+        appsAt = now
+        apps.removeAllViews()
         val list = Stats.snapshot()
-        apps.text = if (list.isEmpty()) {
-            "None yet. Open an app with Chinese text, then come back."
-        } else list.joinToString("\n\n") { a ->
-            val ago = DateUtils.getRelativeTimeSpanString(a.lastSeen, System.currentTimeMillis(), DateUtils.SECOND_IN_MILLIS)
+        if (list.isEmpty()) {
+            apps.addView(text("None yet. Open an app with Chinese text, then come back.", 14f))
+            return
+        }
+        for (a in list) {
+            val open = a.pkg in expanded
+            val ago = DateUtils.getRelativeTimeSpanString(a.lastSeen, now, DateUtils.SECOND_IN_MILLIS)
             val verdict = when {
                 a.withBoxes == 0 -> "no boxes"
                 a.withBoxes < a.blocks -> "some boxes"
                 else -> "boxes ✓"
             }
-            "${a.pkg}\n  $verdict: ${a.withBoxes}/${a.blocks} text blocks, ${a.chars} chars marked, ${a.scanMs} ms · $ago"
+            apps.addView(text(
+                (if (open) "▾ " else "▸ ") + a.pkg + "\n   " + verdict + ": " + a.withBoxes + "/" + a.blocks +
+                    " text blocks, " + a.seen.size + " different characters · " + ago, 14f,
+            ).apply {
+                setPadding(0, (10 * dp).toInt(), 0, (6 * dp).toInt())
+                setOnClickListener {
+                    if (!expanded.remove(a.pkg)) expanded.add(a.pkg)
+                    renderApps(true)
+                }
+            })
+            if (open) apps.addView(charsView(a))
+        }
+    }
+
+    /** An app's characters in the order first seen; yours on their level's highlight, as on screen. */
+    private fun charsView(a: Stats.App): TextView {
+        val sb = android.text.SpannableStringBuilder()
+        for (cp in a.seen) {
+            val start = sb.length
+            sb.appendCodePoint(cp)
+            val lv = Mine.level(cp)
+            if (lv >= 0) {
+                val c = Palette.level(lv, dark)
+                sb.setSpan(
+                    android.text.style.BackgroundColorSpan(Color.argb(110, Color.red(c), Color.green(c), Color.blue(c))),
+                    start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+            sb.append(' ')
+        }
+        return TextView(this).apply {
+            text = sb
+            textSize = 22f
+            setTextColor(fg())
+            setLineSpacing(4 * dp, 1f)
+            setTextIsSelectable(true)
+            setPadding((14 * dp).toInt(), 0, 0, (10 * dp).toInt())
         }
     }
 
