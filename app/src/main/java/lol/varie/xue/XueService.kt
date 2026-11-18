@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -52,7 +53,9 @@ class XueService : AccessibilityService() {
     @Volatile private var tapOn = false
     @Volatile private var lastScrollAt = 0L
     private var ocr: OcrMode? = null
-    private var selecting = false
+    private var lens: LensView? = null
+    private var lensShot: android.graphics.Bitmap? = null
+    private var lensParams: WindowManager.LayoutParams? = null
     /** Marks from the accessibility text, and from OCR; drawn together. */
     private var textMarks: List<Mark> = emptyList()
     private var ocrMarks: List<Mark> = emptyList()
@@ -169,13 +172,13 @@ class XueService : AccessibilityService() {
         if (looking == on) return
         looking = on
         layer?.looking = on
-        layerTakesTouches(on || selecting)
+        layerTakesTouches(on)
         button?.looking = on
         requestScan()
         LookTile.refresh(this)
     }
 
-    /** The layer takes touches (look and select modes) or lets them all through. */
+    /** The layer takes touches (look mode) or lets them all through. */
     private fun layerTakesTouches(on: Boolean) {
         val lp = layerParams ?: return
         lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
@@ -186,20 +189,146 @@ class XueService : AccessibilityService() {
     }
 
     /**
-     * Select mode (from the notification or the "学 select" tile): the shade closes, the screen dims, and a box
-     * dragged over text is read and opened in the quiz like text shared to it. Ends after one box, or a tap.
+     * Lens (from the notification or the "学 lens" tile), like Google Lens on the screen: the shade closes, a still
+     * screenshot covers the screen with every character in it marked (the app's text now, and OCR of the picture),
+     * and taps or drags go to it alone. Closed with × or Back; hidden while a card or sentence it opened is up.
      */
-    fun startSelect() = main.post {
-        if (selecting) return@post
+    fun startLens() = main.post {
+        if (lens != null) return@post
+        if (Build.VERSION.SDK_INT < 30) {
+            toast("Lens needs Android 11 or newer")
+            return@post
+        }
         setLooking(false)
-        selecting = true
         if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
-        layerTakesTouches(true)
-        layer?.onArea = { area ->
-            selecting = false
-            layer?.onArea = null
-            layerTakesTouches(looking)
-            if (area != null) readArea(area)
+        // Wait for the shade to go, hide 学's own marks so they aren't in the picture, then take it.
+        main.postDelayed({
+            layer?.visibility = View.INVISIBLE
+            button?.visibility = View.INVISIBLE
+            main.postDelayed(::shootLens, 120)
+        }, 450)
+    }
+
+    @android.annotation.TargetApi(30)
+    private fun shootLens() {
+        val marks = textMarks
+        fun restore() {
+            layer?.visibility = View.VISIBLE
+            button?.visibility = if (prefs.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
+        }
+        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(r: AccessibilityService.ScreenshotResult) {
+                restore()
+                val shot = runCatching {
+                    val hw = android.graphics.Bitmap.wrapHardwareBuffer(r.hardwareBuffer, r.colorSpace)
+                    val soft = hw?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    hw?.recycle()
+                    r.hardwareBuffer.close()
+                    soft
+                }.getOrNull()
+                if (shot == null) toast("Lens couldn't read the screen") else showLens(shot, marks)
+            }
+
+            override fun onFailure(code: Int) {
+                restore()
+                toast(
+                    if (code == AccessibilityService.ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS) {
+                        "Lens needs the screenshot permission: turn \"学 marks\" off and on in Accessibility settings"
+                    } else if (code == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) {
+                        "This app doesn't allow screenshots"
+                    } else {
+                        "Lens couldn't take a screenshot ($code)"
+                    },
+                )
+            }
+        })
+    }
+
+    @android.annotation.TargetApi(30)
+    private fun showLens(shot: android.graphics.Bitmap, marks: List<Mark>) {
+        val w = wm ?: return
+        val v = LensView(
+            this, shot,
+            onTap = { cp -> openPanel(cp) },
+            onBox = { b -> lensRead(b) },
+            onClose = ::closeLens,
+        )
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.OPAQUE,
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        lp.fitInsetsTypes = 0
+        lens = v
+        lensShot = shot
+        lensParams = lp
+        lensShown(true)
+        v.setMarks(marks)
+        v.status = "Reading the picture…"
+        // Tap mode lets every touch through to Lens meanwhile.
+        if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(true)
+        val o = ocr ?: OcrMode(this, workerHandler) { chars -> main.post { setOcr(chars) } }.also { ocr = it }
+        o.readShot(shot) { chars, why ->
+            main.post {
+                if (lens !== v) return@post
+                if (chars != null) {
+                    val dark = Palette.isDark(this)
+                    val extra = chars.map { toMark(it, dark) }.filter { o2 -> marks.none { overlaps(it, o2) } }
+                    v.setMarks(marks + extra)
+                    v.status = if (marks.isEmpty() && extra.isEmpty()) "No Chinese found on this screen" else ""
+                } else {
+                    v.status = why ?: ""
+                }
+            }
+        }
+    }
+
+    /** Lens window on or off screen (it is taken away while a card it opened is up, so the card can be used). */
+    private fun lensShown(on: Boolean) {
+        val v = lens ?: return
+        val lp = lensParams ?: return
+        val attached = v.isAttachedToWindow
+        if (on && !attached) {
+            runCatching { wm?.addView(v, lp) }
+            v.requestFocus()
+        } else if (!on && attached) {
+            runCatching { wm?.removeView(v) }
+        }
+    }
+
+    fun closeLens() {
+        lensShown(false)
+        lens = null
+        lensParams = null
+        lensShot?.recycle()
+        lensShot = null
+        if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(looking)
+    }
+
+    /** The panel went away: back to Lens, if it was open. */
+    fun onPanelHidden() = main.post { if (lens != null) lensShown(true) }
+
+    /** A box dragged in Lens: the characters marked in it, or else OCR of that part of the picture. */
+    @android.annotation.TargetApi(30)
+    private fun lensRead(b: android.graphics.RectF) {
+        val v = lens ?: return
+        val inside = v.current().filter { b.contains((it.left + it.right) / 2, (it.top + it.bottom) / 2) }
+        if (inside.isNotEmpty()) {
+            openText(readingOrder(inside))
+            return
+        }
+        val shot = lensShot ?: return
+        v.status = "Reading…"
+        (ocr ?: return).readShotArea(shot, b) { text, why ->
+            main.post {
+                if (lens !== v) return@post
+                v.status = ""
+                if (text != null) openText(text) else v.status = why ?: "Nothing found there"
+            }
         }
     }
 
@@ -233,6 +362,7 @@ class XueService : AccessibilityService() {
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
 
     private fun openText(text: String) {
+        lensShown(false)
         startActivity(
             Intent(this, PanelActivity::class.java)
                 .putExtra(PanelActivity.EXTRA_TEXT, text)
@@ -261,7 +391,6 @@ class XueService : AccessibilityService() {
             val t = tap ?: TapMode(
                 this, main,
                 markAt = { x, y -> layer?.markAt(x, y) },
-                scrolling = { SystemClock.uptimeMillis() - lastScrollAt < 400 },
                 onTap = ::openPanel,
                 onBox = { b -> layer?.setBox(b) },
                 onSelect = { b -> readArea(b) },
@@ -288,30 +417,35 @@ class XueService : AccessibilityService() {
     /** Characters read by OCR, coloured like the others; never a link (a tap on one opens the panel). */
     private fun setOcr(chars: List<OcrChar>) {
         val dark = Palette.isDark(this)
-        ocrMarks = chars.map { c ->
-            val mine = Mine.level(c.cp)
-            Mark(
-                c.box.left, c.box.top, c.box.right, c.box.bottom, c.cp,
-                under = Palette.freq(Freq.level(c.cp), dark),
-                high = if (mine >= 0) Palette.level(mine, dark) else null,
-                clickable = false,
-            )
-        }
+        ocrMarks = chars.map { toMark(it, dark) }
         publish()
+    }
+
+    private fun toMark(c: OcrChar, dark: Boolean): Mark {
+        val mine = Mine.level(c.cp)
+        return Mark(
+            c.box.left, c.box.top, c.box.right, c.box.bottom, c.cp,
+            under = Palette.freq(Freq.level(c.cp), dark),
+            high = if (mine >= 0) Palette.level(mine, dark) else null,
+        )
+    }
+
+    /** An OCR mark lying on a text mark (its middle inside it): the text one is kept, its box is better. */
+    private fun overlaps(t: Mark, o: Mark): Boolean {
+        val cx = (o.left + o.right) / 2
+        val cy = (o.top + o.bottom) / 2
+        return cx >= t.left && cx <= t.right && cy >= t.top && cy <= t.bottom
     }
 
     /** Draws text marks plus the OCR marks that aren't already on a text mark (text gives the better boxes). */
     private fun publish() {
-        val all = if (ocrMarks.isEmpty()) textMarks else textMarks + ocrMarks.filter { o ->
-            val cx = (o.left + o.right) / 2
-            val cy = (o.top + o.bottom) / 2
-            textMarks.none { cx >= it.left && cx <= it.right && cy >= it.top && cy <= it.bottom }
-        }
+        val all = if (ocrMarks.isEmpty()) textMarks else textMarks + ocrMarks.filter { o -> textMarks.none { overlaps(it, o) } }
         layer?.setMarks(all)
         if (Build.VERSION.SDK_INT >= 33) tap?.setMarks(all)
     }
 
     private fun openPanel(cp: Int) {
+        lensShown(false)
         startActivity(
             Intent(this, PanelActivity::class.java)
                 .putExtra(PanelActivity.EXTRA_CHAR, String(Character.toChars(cp)))
@@ -341,6 +475,7 @@ class XueService : AccessibilityService() {
     override fun onDestroy() {
         running = null
         StatusNote.hide(this)
+        closeLens()
         if (Build.VERSION.SDK_INT >= 33) tap?.stop()
         if (Build.VERSION.SDK_INT >= 30) ocr?.close()
         if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
@@ -428,7 +563,7 @@ class XueService : AccessibilityService() {
                 if (root != null && root.packageName != packageName) {
                     val t0 = SystemClock.uptimeMillis()
                     val s = Scan(dark, covered, wb)
-                    walk(root, 0, 99, s)
+                    walk(root, 0, s)
                     all.addAll(s.out)
                     Stats.record(
                         root.packageName?.toString() ?: "?",
@@ -442,23 +577,19 @@ class XueService : AccessibilityService() {
     }
 
     /**
-     * [sinceClickable]: how many levels up the nearest clickable ancestor is (1 = the parent). Text in a clickable
-     * node, or under one at most 3 levels up, belongs to a link or button: tap mode leaves its taps to the app.
-     *
      * Children first: some apps (Jetpack Compose cards, React Native) also give a container the joined text of what
      * is inside it, and report boxes for that copy in the wrong places, which put marks over unrelated text.
      * A node whose Chinese characters all appear in its descendants' text is such a copy and is skipped.
      * Returns the Chinese characters of the text in this subtree.
      */
-    private fun walk(node: AccessibilityNodeInfo, depth: Int, sinceClickable: Int, s: Scan): String {
+    private fun walk(node: AccessibilityNodeInfo, depth: Int, s: Scan): String {
         if (depth > MAX_DEPTH || s.nodes >= MAX_NODES) return ""
         s.nodes++
         if (!node.isVisibleToUser) return ""
-        val next = if (node.isClickable) 1 else sinceClickable + 1
         val inside = StringBuilder()
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            inside.append(walk(child, depth + 1, next, s))
+            inside.append(walk(child, depth + 1, s))
         }
         val text = node.text
         if (!text.isNullOrEmpty()) {
@@ -467,7 +598,7 @@ class XueService : AccessibilityService() {
             if (han.isNotEmpty()) {
                 val kids = inside.toString()
                 val copy = kids.isNotEmpty() && han.codePoints().allMatch { cp -> kids.contains(String(Character.toChars(cp))) }
-                if (!copy) markText(node, t, node.isClickable || sinceClickable <= 3, s)
+                if (!copy) markText(node, t, s)
                 inside.append(han)
             }
         }
@@ -491,7 +622,7 @@ class XueService : AccessibilityService() {
 
     private fun isHan(cp: Int) = Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN
 
-    private fun markText(node: AccessibilityNodeInfo, text: String, clickable: Boolean, s: Scan) {
+    private fun markText(node: AccessibilityNodeInfo, text: String, s: Scan) {
         var first = -1
         var last = -1
         var i = 0
@@ -542,7 +673,6 @@ class XueService : AccessibilityService() {
                 r.left, r.top, r.right, r.bottom, cp,
                 under = Palette.freq(Freq.level(cp), s.dark),
                 high = if (mine >= 0) Palette.level(mine, s.dark) else null,
-                clickable = clickable,
             ))
         }
     }

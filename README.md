@@ -19,13 +19,14 @@ A tapped character opens its card from the quiz, filled with your data (date add
 panel's quiz isn't signed in: the app gives it your list and results. With **Quiz me** on, the quiz asks the
 character as a question instead.
 
-**Read a sentence**: in tap mode, drag from a character over the sentence. Elsewhere, **Select area** (from 学's
-notification or the **学 select** tile): drag a box over text, or a picture of text;
-the characters marked there (or, if none, the area read by OCR) open in the quiz as text shared to it does,
-split into words.
+**Lens** (from 学's notification or the **学 lens** tile), like Google Lens on the screen: a still screenshot
+covers the screen with every character in it marked, the app's text and the Chinese in pictures (OCR). Tap a
+character for its card, drag over a sentence to open it in the quiz (split into words, as text shared to it), ×
+or Back to close. The app underneath gets nothing while it is open. In tap mode a drag from a character also opens
+the sentence.
 
 While 学 is on, a small 学 shows in the status bar (Android 13+: allow notifications); pulled down, it lists the
-modes that are on, with buttons for Select area, Tap and OCR.
+modes that are on, with buttons for Lens, Tap and OCR.
 
 **OCR mode** (extra, off by default, Android 11+): characters in pictures, video and games, which have no text
 for the accessibility service, are read from screenshots with ML Kit's on-device Chinese text recognition and

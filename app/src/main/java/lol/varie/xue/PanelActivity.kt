@@ -260,6 +260,12 @@ class PanelActivity : Activity() {
         XueService.running?.syncSoon()
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Gone from the screen however it left (Back, a tap above, Home): Lens, if open, comes back.
+        XueService.running?.onPanelHidden()
+    }
+
     @Deprecated("Back hides the sheet; the page stays loaded for the next character.")
     override fun onBackPressed() {
         hide()

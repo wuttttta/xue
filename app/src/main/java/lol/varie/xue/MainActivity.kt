@@ -92,8 +92,8 @@ class MainActivity : Activity() {
             })
             col.addView(text(
                 "Tap a character: its card. Drag from a character over a sentence: the quiz opens it, split into words. " +
-                    "Touches that don't start on a character (scrolling from a blank part, links, buttons, typing) go to " +
-                    "the app as usual; a drag on text selects instead of scrolling. It uses Android's touch exploration, " +
+                    "Every character is 学's, also in links and buttons; touches that don't start on one (scrolling from " +
+                    "a blank part, typing) go to the app as usual, and a drag on text selects instead of scrolling. It uses Android's touch exploration, " +
                     "like TalkBack, so some apps may act as if a screen reader were on. The \"学 tap\" Quick Settings " +
                     "tile, or the button in 学's notification, turns it on and off.", 13f, muted()
             ))
@@ -128,16 +128,18 @@ class MainActivity : Activity() {
                 "On: the quiz asks it as a question.", 13f, muted()
         ))
 
-        col.addView(heading("Read a sentence"))
+        col.addView(heading("Lens"))
         col.addView(text(
-            "In tap mode, drag from a character over the sentence. Anywhere else (a picture with OCR off, tap mode " +
-                "off): \"Select area\" in 学's notification or the \"学 select\" Quick Settings tile, then drag a box. " +
-                "The quiz opens the text split into words, as when you share text to it.", 14f
+            "Like Google Lens on the screen: \"Lens\" in 学's notification, or the \"学 lens\" Quick Settings tile, " +
+                "freezes the screen with every character on it marked, the app's text and the Chinese in pictures. " +
+                "Tap a character for its card, drag over a sentence to open it in the quiz, × or Back to close. " +
+                "The app underneath gets nothing while it's open. (In tap mode, a drag from a character also opens " +
+                "the sentence.)", 14f
         ))
         if (Build.VERSION.SDK_INT >= 33) {
-            col.addView(button("Add the 学 select tile") {
+            col.addView(button("Add the 学 lens tile") {
                 getSystemService(android.app.StatusBarManager::class.java).requestAddTileService(
-                    android.content.ComponentName(this, SelectTile::class.java), "学 select",
+                    android.content.ComponentName(this, LensTile::class.java), "学 lens",
                     android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_select), mainExecutor,
                 ) { }
             })

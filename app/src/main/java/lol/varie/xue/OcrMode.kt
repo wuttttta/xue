@@ -250,6 +250,70 @@ class OcrMode(
             }
     }
 
+    /** Runs [then] on the worker once the model is on the phone; if it isn't, starts its download and says so. */
+    private fun withModel(then: () -> Unit, missing: (String) -> Unit) {
+        if (ready) {
+            worker.post(then)
+            return
+        }
+        ModuleInstall.getClient(service).areModulesAvailable(recognizer)
+            .addOnSuccessListener(onWorker) { r ->
+                if (r.areModulesAvailable()) {
+                    ready = true
+                    then()
+                } else {
+                    download()
+                    missing("Downloading the OCR model first (once); text from the app is marked meanwhile")
+                }
+            }
+            .addOnFailureListener(onWorker) { missing("Reading images needs Google Play services") }
+    }
+
+    /**
+     * Lens: every Chinese character in a still screenshot (screen coordinates, as the bitmap is the whole display).
+     * [cb] gets them, or null and why not. The bitmap isn't recycled here.
+     */
+    fun readShot(shot: Bitmap, cb: (List<OcrChar>?, String?) -> Unit) {
+        withModel({
+            recognizer.process(InputImage.fromBitmap(shot, 0))
+                .addOnSuccessListener(onWorker) { text ->
+                    val out = ArrayList<OcrChar>()
+                    for (block in text.textBlocks) for (line in block.lines) for (el in line.elements) for (sym in el.symbols) {
+                        val b = sym.boundingBox ?: continue
+                        val t = sym.text
+                        if (t.isEmpty()) continue
+                        val cp = t.codePointAt(0)
+                        if (Character.UnicodeScript.of(cp) != Character.UnicodeScript.HAN) continue
+                        out.add(OcrChar(RectF(b), cp))
+                    }
+                    cb(out, null)
+                }
+                .addOnFailureListener(onWorker) { e -> cb(null, "Recognition failed: ${e.message ?: e.javaClass.simpleName}") }
+        }, { why -> cb(null, why) })
+    }
+
+    /** Lens: the text in one box of a still screenshot (spaces and line breaks removed), or null and why not. */
+    fun readShotArea(shot: Bitmap, area: RectF, cb: (String?, String?) -> Unit) {
+        withModel({
+            val r = android.graphics.Rect(area.left.toInt(), area.top.toInt(), area.right.toInt(), area.bottom.toInt())
+            if (!r.intersect(0, 0, shot.width, shot.height)) {
+                cb(null, "Nothing there")
+            } else {
+                val crop = Bitmap.createBitmap(shot, r.left, r.top, r.width(), r.height())
+                recognizer.process(InputImage.fromBitmap(crop, 0))
+                    .addOnSuccessListener(onWorker) { text ->
+                        if (crop !== shot) crop.recycle()
+                        val t = text.text.replace(Regex("\\s+"), "")
+                        cb(t.ifEmpty { null }, if (t.isEmpty()) "No text found there" else null)
+                    }
+                    .addOnFailureListener(onWorker) { e ->
+                        if (crop !== shot) crop.recycle()
+                        cb(null, "Recognition failed: ${e.message ?: e.javaClass.simpleName}")
+                    }
+            }
+        }, { why -> cb(null, why) })
+    }
+
     /**
      * Reads the text in one box of the screen once (select mode), whether OCR mode is on or not.
      * [cb] gets the text (spaces and line breaks removed: Chinese doesn't use them) or, if it failed, null and why.

@@ -13,12 +13,10 @@ import android.view.View
  * One character on screen: its box in screen coordinates and the character.
  * [under]: the underline's colour, by frequency (ƒ). [high]: the highlight's colour, by your level, for your
  * characters only (null for the rest).
- * [clickable]: it is part of a link or button (it or one of its 3 nearest ancestors is clickable), so a tap
- * belongs to the app.
  */
 class Mark(
     val left: Float, val top: Float, val right: Float, val bottom: Float,
-    val cp: Int, val under: Int, val high: Int?, val clickable: Boolean,
+    val cp: Int, val under: Int, val high: Int?,
 )
 
 /**
@@ -45,26 +43,7 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
             invalidate()
         }
 
-    /**
-     * Select mode: the layer takes touches, a drag draws a box, and lifting the finger calls [onArea] with it
-     * (screen coordinates; null when it was only a tap, which cancels).
-     */
-    var onArea: ((RectF?) -> Unit)? = null
-        set(v) {
-            field = v
-            box = null
-            invalidate()
-        }
-    private var box: RectF? = null
-    private var boxX = 0f
-    private var boxY = 0f
     private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val hint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textAlign = Paint.Align.CENTER
-        textSize = 16 * resources.displayMetrics.scaledDensity
-        setShadowLayer(4 * resources.displayMetrics.density, 0f, 0f, Color.BLACK)
-    }
 
     /** A box being dragged in tap mode (drawn without the select veil); null to clear. */
     fun setBox(b: RectF?) {
@@ -85,7 +64,7 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
 
     /** The character at a screen point (a tap in tap mode), with a small margin. */
     fun markAt(x: Float, y: Float): Mark? {
-        val slop = 4 * density
+        val slop = 6 * density
         return marks.firstOrNull { x >= it.left - slop && x <= it.right + slop && y >= it.top - slop && y <= it.bottom + slop }
     }
 
@@ -95,13 +74,9 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (onArea != null || liveBox != null) {
-            if (onArea != null) canvas.drawColor(Color.argb(70, 0, 0, 0))
-            val b = box ?: liveBox
+        liveBox?.let { b ->
             getLocationOnScreen(loc)
-            if (b == null) {
-                canvas.drawText("Drag over the text to read", width / 2f, height * 0.18f, hint)
-            } else {
+            run {
                 val r = RectF(b)
                 r.offset(-loc[0].toFloat(), -loc[1].toFloat())
                 // Blue (the quiz's accent) shows on light and dark pages alike.
@@ -151,26 +126,6 @@ class MarkLayer(context: Context, private val onPick: (Int?) -> Unit) : View(con
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        onArea?.let { done ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    boxX = e.rawX
-                    boxY = e.rawY
-                    box = null
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    box = RectF(minOf(boxX, e.rawX), minOf(boxY, e.rawY), maxOf(boxX, e.rawX), maxOf(boxY, e.rawY))
-                    invalidate()
-                }
-                MotionEvent.ACTION_UP -> {
-                    val b = box
-                    box = null
-                    done(if (b != null && b.width() > 16 * density && b.height() > 12 * density) b else null)
-                }
-                MotionEvent.ACTION_CANCEL -> done(null)
-            }
-            return true
-        }
         if (!looking) return false
         if (e.actionMasked == MotionEvent.ACTION_UP) onPick(hit(e.rawX, e.rawY))
         return true

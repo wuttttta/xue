@@ -11,13 +11,13 @@ import android.os.Build
 
 /**
  * The signal in the status bar: a small 学 while the service is on. Pulled down, it says which modes are on and
- * has buttons for them: Select area, Tap on/off, OCR on/off. Needs the notification permission (asked by the
+ * has buttons for them: Lens, Tap on/off, OCR on/off. Needs the notification permission (asked by the
  * settings screen on Android 13+); without it nothing shows and nothing else changes.
  */
 object StatusNote {
     private const val CHANNEL = "status"
     private const val ID = 1
-    const val ACTION_SELECT = "lol.varie.xue.SELECT"
+    const val ACTION_LENS = "lol.varie.xue.LENS"
     const val ACTION_TAP = "lol.varie.xue.TAP"
     const val ACTION_OCR = "lol.varie.xue.OCR"
 
@@ -49,7 +49,7 @@ object StatusNote {
             .setOngoing(true)
             .setShowWhen(false)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(action(context, ACTION_SELECT, R.drawable.ic_select, "Select area"))
+            .addAction(action(context, ACTION_LENS, R.drawable.ic_select, "Lens"))
         if (Build.VERSION.SDK_INT >= 33) {
             b.addAction(action(context, ACTION_TAP, R.drawable.ic_tile, if (tap) "Tap off" else "Tap on"))
         }
@@ -78,7 +78,7 @@ class NoteReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val p = Prefs.get(context)
         when (intent.action) {
-            StatusNote.ACTION_SELECT -> XueService.running?.startSelect()
+            StatusNote.ACTION_LENS -> XueService.running?.startLens()
             StatusNote.ACTION_TAP -> p.edit().putBoolean(Prefs.TAP, !p.getBoolean(Prefs.TAP, false)).apply()
             StatusNote.ACTION_OCR -> p.edit().putBoolean(Prefs.OCR, !p.getBoolean(Prefs.OCR, false)).apply()
         }

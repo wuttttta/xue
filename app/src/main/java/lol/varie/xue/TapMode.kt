@@ -20,8 +20,9 @@ import kotlin.math.abs
  * exploration and takes touches through a TouchInteractionController. To keep that out of the way:
  *
  * - The whole screen except the characters is a **passthrough region** (setTouchExplorationPassthroughRegion):
- *   Android hands those touches straight to the app itself, without asking 学. Characters in links and buttons
- *   stay in the region, so their taps keep working too.
+ *   Android hands those touches straight to the app itself, without asking 学. Every character is taken, also
+ *   in links, buttons and cards (an earlier version left those to the app, and taps got lost to it too often):
+ *   tap mode is for reading, and is switched off for using the app.
  * - A touch that starts on a character comes to 学. Lifted without moving: the character's panel opens. Moved:
  *   it draws a box from where it started ([onBox]), and lifting the finger reads the text in the box ([onSelect]),
  *   so a sentence is one drag away. A second finger (pinch) or a scroll still going hands the touch back to the
@@ -37,8 +38,6 @@ class TapMode(
     private val main: Handler,
     /** The character mark under a screen point, or null. */
     private val markAt: (Float, Float) -> Mark?,
-    /** True while something on screen is scrolling (a tap then only stops the scroll). */
-    private val scrolling: () -> Boolean,
     private val onTap: (Int) -> Unit,
     /** The box being dragged (screen coordinates), or null when it's gone. */
     private val onBox: (RectF?) -> Unit,
@@ -138,10 +137,9 @@ class TapMode(
         if (!active) return
         if (looking) return passAll()
         val r = Region(screen())
-        val pad = (3 * density).toInt()
+        val pad = (6 * density).toInt()
         val box = Rect()
         for (m in marks) {
-            if (m.clickable) continue
             box.set(m.left.toInt() - pad, m.top.toInt() - pad, m.right.toInt() + pad, m.bottom.toInt() + pad)
             r.op(box, Region.Op.DIFFERENCE)
         }
@@ -165,8 +163,8 @@ class TapMode(
                     held = null
                     return
                 }
-                val m = if (scrolling()) null else markAt(e.x, e.y)
-                if (m == null || m.clickable) {
+                val m = markAt(e.x, e.y)
+                if (m == null) {
                     // Not on a character after all (the screen moved since the last scan): give it back now.
                     held = null
                     delegate()
