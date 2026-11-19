@@ -66,6 +66,7 @@ class XueService : AccessibilityService() {
     val isLooking: Boolean get() = looking
     private lateinit var prefs: SharedPreferences
     @Volatile private var show = true
+    @Volatile private var byAge = false
 
     @Volatile private var scanQueued = false
     private var lastScan = 0L
@@ -83,6 +84,10 @@ class XueService : AccessibilityService() {
             Prefs.TAP -> main.post { applyTapMode(); StatusNote.show(this) }
             Prefs.OCR -> main.post { applyOcr(); StatusNote.show(this) }
             Prefs.QUIZ -> main.post { StatusNote.show(this) }
+            Prefs.BY_AGE -> {
+                byAge = p.getBoolean(Prefs.BY_AGE, false)
+                requestScan()
+            }
             Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
         }
     }
@@ -92,6 +97,7 @@ class XueService : AccessibilityService() {
         running = this
         prefs = Prefs.get(this)
         show = prefs.getBoolean(Prefs.SHOW, true)
+        byAge = prefs.getBoolean(Prefs.BY_AGE, false)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         addLayer()
         addButton()
@@ -195,6 +201,7 @@ class XueService : AccessibilityService() {
      */
     fun startLens() = main.post {
         if (lens != null) return@post
+        dailySync()
         if (Build.VERSION.SDK_INT < 30) {
             toast("Lens needs Android 11 or newer")
             return@post
@@ -422,11 +429,10 @@ class XueService : AccessibilityService() {
     }
 
     private fun toMark(c: OcrChar, dark: Boolean): Mark {
-        val mine = Mine.level(c.cp)
         return Mark(
             c.box.left, c.box.top, c.box.right, c.box.bottom, c.cp,
             under = Palette.freq(Freq.level(c.cp), dark),
-            high = if (mine >= 0) Palette.level(mine, dark) else null,
+            high = Mine.highlight(c.cp, dark, byAge),
         )
     }
 
@@ -446,6 +452,7 @@ class XueService : AccessibilityService() {
 
     private fun openPanel(cp: Int) {
         lensShown(false)
+        dailySync()
         startActivity(
             Intent(this, PanelActivity::class.java)
                 .putExtra(PanelActivity.EXTRA_CHAR, String(Character.toChars(cp)))
@@ -487,15 +494,17 @@ class XueService : AccessibilityService() {
         super.onDestroy()
     }
 
-    /** Your list and results: fetched when stale, checked again every few minutes while the service runs. */
-    private val syncMine = object : Runnable {
-        override fun run() {
-            if (Mine.code(this@XueService) != null && Mine.stale()) {
-                Mine.sync(this@XueService)
-                requestScan()
-            }
-            workerHandler.postDelayed(this, 5 * 60 * 1000L)
+    /** Your list and results: fetched on the first use of the day (the saved copy is used the rest of the day). */
+    private val syncMine = Runnable {
+        if (Mine.code(this@XueService) != null && Mine.stale(this@XueService)) {
+            Mine.sync(this@XueService)
+            requestScan()
         }
+    }
+
+    /** Opened something of 学's (the panel, Lens): a new day means a fresh copy first. */
+    fun dailySync() {
+        workerHandler.post(syncMine)
     }
 
     /** After the panel closes: the list may have new words, the results new answers (the quiz sends those ~25 s later). */
@@ -669,11 +678,10 @@ class XueService : AccessibilityService() {
             if (!s.seen.add(key)) continue
             s.chars++
             // Underline by ƒ for every character; highlight by your level for yours.
-            val mine = Mine.level(cp)
             s.out.add(Mark(
                 r.left, r.top, r.right, r.bottom, cp,
                 under = Palette.freq(Freq.level(cp), s.dark),
-                high = if (mine >= 0) Palette.level(mine, s.dark) else null,
+                high = Mine.highlight(cp, s.dark, byAge),
             ))
         }
     }

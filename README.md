@@ -67,7 +67,9 @@ The app reads (never writes) two pastes on [pastebox](https://paste.varie.lol): 
 type, and your quiz results, found through the list's `# stats: <code>` header line, which the quiz writes. Each
 character of a listed word is yours; its level is computed as in the quiz from its last answers: none yet → New,
 else `min(5, 1 + floor(share wrong × 5))`. Results kept for whole words don't colour single characters.
-The app syncs every 15 minutes while it runs, or on **Sync now**, and keeps the last copy for offline use.
+The app fetches them on the first use of each day (and on **Sync now**, and after you close the panel) and keeps
+the copy for the rest of the day and for offline use. The highlight shows your level, or, with **Highlight by
+age**, how long ago each character became yours (the quiz's Age colours: today … a month and more).
 
 ## Privacy
 

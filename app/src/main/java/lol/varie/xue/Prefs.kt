@@ -17,6 +17,8 @@ object Prefs {
     const val QUIZ = "quiz"
     /** The panel's height as a share of the screen, as last dragged with its handle. */
     const val PANEL_HEIGHT = "panel_height"
+    /** Highlight your characters by their age in your list instead of your level. */
+    const val BY_AGE = "by_age"
     /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
     const val BUTTON = "button"
     /** Where the floating look button was left. */

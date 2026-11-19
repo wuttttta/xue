@@ -226,8 +226,30 @@ class MainActivity : Activity() {
         col.addView(panelLine)
 
         col.addView(heading("Colours"))
-        col.addView(text("Highlight, on your characters: your level, how often you get it wrong", 13f, muted()))
-        col.addView(Legend(this, dark, listOf("New", "L1", "L2", "L3", "L4", "L5"), null, highlight = true) { Palette.level(it, dark) })
+        val byAge = prefs.getBoolean(Prefs.BY_AGE, false)
+        val levelKey = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        levelKey.addView(text("Highlight, on your characters: your level, how often you get it wrong", 13f, muted()))
+        levelKey.addView(Legend(this, dark, listOf("New", "L1", "L2", "L3", "L4", "L5"), null, highlight = true) { Palette.level(it, dark) })
+        val ageKey = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        ageKey.addView(text("Highlight, on your characters: how long ago it became yours (added to your list)", 13f, muted()))
+        ageKey.addView(Legend(this, dark, listOf("today", "3 days", "a week", "a month", "older"), null, highlight = true) { Palette.age(it) })
+        levelKey.visibility = if (byAge) View.GONE else View.VISIBLE
+        ageKey.visibility = if (byAge) View.VISIBLE else View.GONE
+        col.addView(Switch(this).apply {
+            text = "Highlight by age in your list instead of level"
+            textSize = 16f
+            setTextColor(fg())
+            isChecked = byAge
+            setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
+            setOnCheckedChangeListener { _, on ->
+                prefs.edit().putBoolean(Prefs.BY_AGE, on).apply()
+                levelKey.visibility = if (on) View.GONE else View.VISIBLE
+                ageKey.visibility = if (on) View.VISIBLE else View.GONE
+                renderApps(true)
+            }
+        })
+        col.addView(levelKey)
+        col.addView(ageKey)
         col.addView(text("Underline, on every character: ƒ, how common", 13f, muted()).apply { setPadding(0, (10 * dp).toInt(), 0, 0) })
         col.addView(Legend(this, dark, listOf("F1", "F2", "F3", "F4", "F5"), listOf("的", "们", "习", "璀", "璨")) {
             Palette.freq(it + 1, dark)
@@ -276,6 +298,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         ui.post(tick)
+        // The first use of the day fetches your list and results; the saved copy serves the rest of the day.
+        if (Mine.code(this) != null && Mine.stale(this)) sync()
     }
 
     override fun onPause() {
@@ -383,9 +407,8 @@ class MainActivity : Activity() {
         for (cp in a.seen) {
             val start = sb.length
             sb.append(String(Character.toChars(cp)))
-            val lv = Mine.level(cp)
-            if (lv >= 0) {
-                val c = Palette.level(lv, dark)
+            val c = Mine.highlight(cp, dark, Prefs.get(this).getBoolean(Prefs.BY_AGE, false))
+            if (c != null) {
                 sb.setSpan(
                     android.text.style.BackgroundColorSpan(Color.argb(110, Color.red(c), Color.green(c), Color.blue(c))),
                     start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,

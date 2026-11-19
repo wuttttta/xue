@@ -23,7 +23,6 @@ object Mine {
     private val STATS_HEADER = Regex("^#\\s*stats:\\s*($CODE)\\s*$")
     private const val LIST_FILE = "list.txt"
     private const val STATS_FILE = "stats.txt"
-    const val REFRESH_MS = 15 * 60 * 1000L
 
     /** Character → level 0..5 (0 New) for characters in the list or the results. */
     @Volatile private var levels: Map<Int, Int> = emptyMap()
@@ -81,7 +80,35 @@ object Mine {
         parse(list, stats)
     }
 
-    fun stale(): Boolean = System.currentTimeMillis() - syncedAt > REFRESH_MS
+    /**
+     * The saved copy is from before today: the first use of 学 each day fetches the list and results again;
+     * the rest of the day runs on the copy (Sync now, and closing the panel, fetch at once).
+     */
+    fun stale(context: Context): Boolean {
+        // The copy on disk counts too, before load() has run in this process.
+        val at = maxOf(syncedAt, Prefs.get(context).getLong(Prefs.SYNCED_AT, 0))
+        if (at == 0L) return true
+        val day = { t: Long -> java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).format(java.util.Date(t)) }
+        return day(at) != day(System.currentTimeMillis())
+    }
+
+    /** When the character became yours: the date of its own line, or else of the first list word with it in. */
+    @Volatile private var added: Map<Int, Long> = emptyMap()
+
+    fun addedAt(cp: Int): Long? = added[cp]
+
+    /**
+     * The highlight's colour for a character: by your level (how often wrong), or by its age in your list (how long
+     * ago it was added, as the quiz's Age colours), as chosen in settings. Null when it isn't yours.
+     */
+    fun highlight(cp: Int, dark: Boolean, byAge: Boolean): Int? {
+        val lv = level(cp)
+        if (lv < 0) return null
+        if (!byAge) return Palette.level(lv, dark)
+        val t = added[cp] ?: return Palette.age(4)
+        val days = (System.currentTimeMillis() - t) / 86_400_000.0
+        return Palette.age(if (days < 1) 0 else if (days < 3) 1 else if (days < 7) 2 else if (days < 30) 3 else 4)
+    }
 
     /** Downloads list and results. Blocking: call off the main thread. Returns null or a short error. */
     @Synchronized
@@ -138,17 +165,30 @@ object Mine {
     private fun parse(list: String?, stats: String?) {
         val map = HashMap<Int, Int>()
         val st = HashMap<String, Stat>()
+        val own = HashMap<Int, Long>()
+        val first = HashMap<Int, Long>()
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT)
         var nWords = 0
         // Every character of a listed word is yours; New until the results say otherwise.
         list?.lineSequence()?.forEach { raw ->
             val line = raw.trim()
             if (line.isEmpty() || line.startsWith("#")) return@forEach
             val p = line.split('|').map { it.trim() }
-            val word = if (p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))) p.getOrNull(1) else p[0]
+            val dated = p[0].matches(Regex("^\\d{4}-\\d{2}-\\d{2}.*"))
+            val word = if (dated) p.getOrNull(1) else p[0]
             if (word.isNullOrEmpty()) return@forEach
             nWords++
+            // Local time, as the quiz writes it; a date alone counts from its midnight.
+            val t = if (!dated) null else runCatching { fmt.parse(if (p[0].length >= 16) p[0].take(16) else p[0].take(10) + " 00:00")?.time }.getOrNull()
+            val single = word.codePointCount(0, word.length) == 1
             word.codePoints().forEach { cp ->
-                if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) map.putIfAbsent(cp, 0)
+                if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) {
+                    map.putIfAbsent(cp, 0)
+                    if (t != null) {
+                        if (single) own[cp] = t
+                        if ((first[cp] ?: Long.MAX_VALUE) > t) first[cp] = t
+                    }
+                }
             }
         }
         var nAnswered = 0
@@ -170,6 +210,7 @@ object Mine {
         }
         levels = map
         this.stats = st
+        added = first + own
         words = nWords
         answered = nAnswered
     }
