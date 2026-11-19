@@ -65,7 +65,16 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding((20 * dp).toInt(), (28 * dp).toInt(), (20 * dp).toInt(), (28 * dp).toInt())
         }
-        col.addView(text("学", 34f, bold = true))
+        // The title, with the installed version to its right.
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty()
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.BOTTOM
+            addView(text("学", 34f, bold = true))
+            addView(text("v$version", 14f, muted()).apply {
+                setPadding((10 * dp).toInt(), 0, 0, (10 * dp).toInt())
+            })
+        })
         col.addView(text("Marks the Chinese characters on screen, in any app: yours by your level, the rest by how common they are (ƒ).", 15f, muted()))
 
         col.addView(heading("Service"))
