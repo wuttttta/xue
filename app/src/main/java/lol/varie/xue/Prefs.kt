@@ -15,6 +15,8 @@ object Prefs {
     const val OCR = "ocr"
     /** Quiz mode: a character's panel asks it as a question instead of showing its card. */
     const val QUIZ = "quiz"
+    /** The panel's height as a share of the screen, as last dragged with its handle. */
+    const val PANEL_HEIGHT = "panel_height"
     /** The floating 学 button for look mode (off by default; the Quick Settings tile does the same). */
     const val BUTTON = "button"
     /** Where the floating look button was left. */

@@ -40,6 +40,9 @@ class PanelActivity : Activity() {
         /** Text from select mode: opened as the quiz opens text shared to it (search, its words to pick). */
         const val EXTRA_TEXT = "text"
         const val QUIZ = "https://varie.lol/h/"
+        /** The sheet's height as a share of the screen: the range the handle can drag it in. */
+        const val MIN_SHARE = 0.3f
+        const val MAX_SHARE = 0.95f
     }
 
     private lateinit var web: WebView
@@ -76,7 +79,7 @@ class PanelActivity : Activity() {
             clipToOutline = true
             isClickable = true // taps on the sheet's edge don't fall through to the scrim
         }
-        // A grab handle; tapping it hides the sheet too.
+        // A grab handle: drag it to make the sheet taller or shorter (remembered); a tap hides the sheet.
         sheet.addView(FrameLayout(this).apply {
             addView(View(this@PanelActivity).apply {
                 background = GradientDrawable().apply {
@@ -84,9 +87,9 @@ class PanelActivity : Activity() {
                     cornerRadius = 2 * dp
                 }
             }, FrameLayout.LayoutParams((36 * dp).toInt(), (4 * dp).toInt(), Gravity.CENTER))
-            setOnClickListener { hide() }
-            contentDescription = "Close"
-        }, LinearLayout.LayoutParams(MATCH_PARENT, (20 * dp).toInt()))
+            contentDescription = "Drag to resize, tap to close"
+            setOnTouchListener(Resizer(sheet))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, (28 * dp).toInt()))
 
         web = WebView(this).apply {
             setBackgroundColor(sheetBg)
@@ -121,7 +124,8 @@ class PanelActivity : Activity() {
         }
         sheet.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
-        val h = (resources.displayMetrics.heightPixels * 0.72f).toInt()
+        val share = Prefs.get(this).getFloat(Prefs.PANEL_HEIGHT, 0.72f).coerceIn(MIN_SHARE, MAX_SHARE)
+        val h = (resources.displayMetrics.heightPixels * share).toInt()
         root.addView(sheet, FrameLayout.LayoutParams(MATCH_PARENT, h, Gravity.BOTTOM))
         // Android 15 draws apps under the navigation bar: keep the quiz above it, and above the keyboard.
         root.setOnApplyWindowInsetsListener { _, insets ->
@@ -253,6 +257,43 @@ class PanelActivity : Activity() {
     }
 
     private fun jsString(s: String) = org.json.JSONObject.quote(s)
+
+    /** The handle's touches: a drag sets the sheet's height (saved when let go), a tap without moving hides it. */
+    private inner class Resizer(private val sheet: View) : View.OnTouchListener {
+        private var startY = 0f
+        private var startH = 0
+        private var moved = false
+
+        @android.annotation.SuppressLint("ClickableViewAccessibility")
+        override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
+            val screen = resources.displayMetrics.heightPixels
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startY = e.rawY
+                    startH = sheet.height
+                    moved = false
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dy = e.rawY - startY
+                    if (moved || kotlin.math.abs(dy) > android.view.ViewConfiguration.get(v.context).scaledTouchSlop) {
+                        moved = true
+                        val lp = sheet.layoutParams
+                        lp.height = (startH - dy).toInt().coerceIn((screen * MIN_SHARE).toInt(), (screen * MAX_SHARE).toInt())
+                        sheet.layoutParams = lp
+                    }
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (moved) {
+                        Prefs.get(this@PanelActivity).edit()
+                            .putFloat(Prefs.PANEL_HEIGHT, sheet.layoutParams.height.toFloat() / screen).apply()
+                    } else {
+                        hide()
+                    }
+                }
+            }
+            return true
+        }
+    }
 
     private fun hide() {
         moveTaskToBack(true)
