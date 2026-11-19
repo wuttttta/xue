@@ -62,3 +62,12 @@ jobs:
           gh release create "v0.1.$GITHUB_RUN_NUMBER" xue.apk --target "$GITHUB_SHA" \
             --title "0.1.$GITHUB_RUN_NUMBER" \
             --notes "Debug build of ${GITHUB_SHA::7}. Install xue.apk on the phone."
+
+      - name: Tell Obtainium about the release
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          OBTAINIUM_PUSH_URL: ${{ secrets.OBTAINIUM_PUSH_URL }}
+        run: |
+          [ -n "$OBTAINIUM_PUSH_URL" ] || exit 0
+          curl -fsS -d "https://github.com/${{ github.repository }}" "$OBTAINIUM_PUSH_URL"
