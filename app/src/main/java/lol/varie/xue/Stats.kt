@@ -7,17 +7,22 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * What 学 has seen per app: whether its text gives per-character boxes, and every character marked in it, from its
- * text or read from its pictures (OCR, Lens), with when it was first seen. The characters are kept on the phone
- * (files/seen.tsv) and can be exported from the settings screen.
+ * What 学 has seen per app: whether its text gives per-character boxes, and the history of the Chinese text marked
+ * in it, as it was on screen: each text block, line, subtitle or sentence in one piece, with when it was first seen
+ * and whether it was text or read from a picture (OCR, Lens). The same text seen again isn't added again.
+ * Entries less than [GROUP_MS] apart in an app form one group (what was on screen together, a reading session).
+ * Kept on the phone (files/history.tsv) and exportable from the settings screen.
  */
 object Stats {
-    /** Distinct characters kept per app, at most. */
-    private const val MAX_CHARS = 5000
-    private const val FILE = "seen.tsv"
+    /** Entries kept per app, at most (the oldest go first). */
+    private const val MAX_ENTRIES = 5000
+    /** Longest text kept for one entry (a whole article in one block is cut). */
+    private const val MAX_TEXT = 400
+    /** A pause longer than this in an app starts a new group. */
+    const val GROUP_MS = 2 * 60 * 1000L
+    private const val FILE = "history.tsv"
 
-    /** A character in an app: first seen when, and whether only in pictures so far. */
-    class Seen(val first: Long, var picture: Boolean)
+    class Entry(val time: Long, val text: String, val picture: Boolean)
 
     class App(val pkg: String) {
         /** Text blocks with Chinese seen in the last scan of this app. */
@@ -25,52 +30,65 @@ object Stats {
         /** Of those, how many gave character boxes. */
         var withBoxes = 0
         var lastSeen = 0L
-        var scanMs = 0L
-        /** Every character marked in this app, in the order first seen. */
-        val seen = LinkedHashMap<Int, Seen>()
+        /** Oldest first. */
+        val entries = ArrayList<Entry>()
+        val known = HashSet<String>()
+
+        /** Entries in groups (a pause over [GROUP_MS] starts a new one), oldest first. */
+        fun groups(): List<List<Entry>> {
+            val out = ArrayList<ArrayList<Entry>>()
+            for (e in entries) {
+                val g = out.lastOrNull()
+                if (g != null && e.time - g.last().time <= GROUP_MS) g.add(e) else out.add(arrayListOf(e))
+            }
+            return out
+        }
+
+        /** Different Chinese characters in all its entries. */
+        fun distinct(): Int = entries.flatMap { e -> e.text.codePoints().toArray().filter { isHan(it) } }.toSet().size
     }
 
     private val apps = LinkedHashMap<String, App>()
     private var loaded = false
 
-    /** Bumped on every change that shows (new app, new characters), so the screen redraws only then. */
+    /** Bumped on every change that shows, so the screen redraws only then. */
     @Volatile var version = 0; private set
     private var savedVersion = 0
     private var savedAt = 0L
 
-    /** From the app's text: the scan's box report and its characters. */
+    fun isHan(cp: Int) = Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN
+
+    /** One line of text as kept: spaces collapsed, no tabs or line breaks, cut to [MAX_TEXT]. */
+    fun clean(t: String): String = t.replace(Regex("\\s+"), " ").trim().take(MAX_TEXT)
+
+    /** From the app's text: the scan's box report and the text blocks marked. */
     @Synchronized
-    fun record(pkg: String, blocks: Int, withBoxes: Int, scanMs: Long, cps: Collection<Int>) {
+    fun record(pkg: String, blocks: Int, withBoxes: Int, texts: Collection<String>) {
         if (blocks == 0) return
         val a = app(pkg)
         a.blocks = blocks
         a.withBoxes = withBoxes
-        a.scanMs = scanMs
-        add(a, cps, picture = false)
+        add(a, texts, picture = false)
     }
 
-    /** Read from the app's pictures (OCR mode, Lens). */
+    /** Read from the app's pictures (OCR mode, Lens): the lines with Chinese. */
     @Synchronized
-    fun recordPicture(pkg: String, cps: Collection<Int>) {
-        if (cps.isEmpty()) return
-        add(app(pkg), cps, picture = true)
+    fun recordPicture(pkg: String, lines: Collection<String>) {
+        if (lines.isEmpty()) return
+        add(app(pkg), lines, picture = true)
     }
 
     private fun app(pkg: String) = apps.getOrPut(pkg) { version++; App(pkg) }
 
-    private fun add(a: App, cps: Collection<Int>, picture: Boolean) {
+    private fun add(a: App, texts: Collection<String>, picture: Boolean) {
         val now = System.currentTimeMillis()
         a.lastSeen = now
-        for (cp in cps) {
-            val s = a.seen[cp]
-            if (s == null) {
-                if (a.seen.size < MAX_CHARS) {
-                    a.seen[cp] = Seen(now, picture)
-                    version++
-                }
-            } else if (s.picture && !picture) {
-                s.picture = false
-            }
+        for (raw in texts) {
+            val t = clean(raw)
+            if (t.isEmpty() || !t.codePoints().anyMatch { isHan(it) } || !a.known.add(t)) continue
+            a.entries.add(Entry(now, t, picture))
+            if (a.entries.size > MAX_ENTRIES) a.known.remove(a.entries.removeAt(0).text)
+            version++
         }
     }
 
@@ -78,9 +96,8 @@ object Stats {
     @Synchronized
     fun snapshot(): List<App> = apps.values.sortedByDescending { it.lastSeen }.map { a ->
         App(a.pkg).also {
-            it.blocks = a.blocks; it.withBoxes = a.withBoxes
-            it.lastSeen = a.lastSeen; it.scanMs = a.scanMs
-            for ((cp, s) in a.seen) it.seen[cp] = Seen(s.first, s.picture)
+            it.blocks = a.blocks; it.withBoxes = a.withBoxes; it.lastSeen = a.lastSeen
+            it.entries.addAll(a.entries)
         }
     }
 
@@ -97,19 +114,20 @@ object Stats {
     fun load(context: Context) {
         if (loaded) return
         loaded = true
+        File(context.filesDir, "seen.tsv").delete() // 0.1.32's characters-only history: no order, nothing to group
         val f = File(context.filesDir, FILE)
         if (!f.isFile) return
         runCatching {
             f.forEachLine { line ->
                 if (line.startsWith("#")) return@forEachLine
                 val p = line.split('\t')
-                if (p.size < 3) return@forEachLine
-                val cp = p[1].takeIf { it.isNotEmpty() }?.codePointAt(0) ?: return@forEachLine
-                val t = p[2].toLongOrNull() ?: return@forEachLine
+                if (p.size < 4) return@forEachLine
+                val t = p[1].toLongOrNull() ?: return@forEachLine
                 val a = apps.getOrPut(p[0]) { App(p[0]) }
-                if (cp !in a.seen) a.seen[cp] = Seen(t, p.getOrNull(3) == "picture")
+                if (a.known.add(p[3])) a.entries.add(Entry(t, p[3], p[2] == "picture"))
                 if (t > a.lastSeen) a.lastSeen = t
             }
+            for (a in apps.values) a.entries.sortBy { it.time }
         }
         version++
         savedVersion = version
@@ -121,8 +139,13 @@ object Stats {
         val now = System.currentTimeMillis()
         if (version == savedVersion || now - savedAt < 10_000) return
         runCatching {
+            val b = StringBuilder("# 学 history\n# app\ttime (ms)\twhere\ttext\n")
+            for (a in apps.values) for (e in a.entries) {
+                b.append(a.pkg).append('\t').append(e.time).append('\t')
+                    .append(if (e.picture) "picture" else "text").append('\t').append(e.text).append('\n')
+            }
             val tmp = File(context.filesDir, "$FILE.tmp")
-            tmp.writeText(text(millis = true))
+            tmp.writeText(b.toString())
             tmp.renameTo(File(context.filesDir, FILE))
             savedVersion = version
             savedAt = now
@@ -130,18 +153,21 @@ object Stats {
     }
 
     /**
-     * The whole history as a tab-separated table: app, character, first seen, where (text or picture).
-     * [millis]: times as milliseconds (the saved file) or as readable local dates (the export).
+     * The export: a tab-separated table, app by app, oldest first, with a blank line between groups.
+     * Columns: app, group (when it started), time, where (text or picture), text.
      */
     @Synchronized
-    fun text(millis: Boolean = false): String {
-        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT)
+    fun export(): String {
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT)
         val b = StringBuilder()
-        b.append("# 学: characters seen per app\n# app\tcharacter\tfirst seen\twhere\n")
-        for (a in apps.values) for ((cp, s) in a.seen) {
-            b.append(a.pkg).append('\t').appendCodePoint(cp).append('\t')
-                .append(if (millis) s.first.toString() else fmt.format(Date(s.first))).append('\t')
-                .append(if (s.picture) "picture" else "text").append('\n')
+        b.append("app\tgroup\ttime\twhere\ttext\n")
+        for (a in apps.values) for (g in a.groups()) {
+            val start = fmt.format(Date(g.first().time))
+            for (e in g) {
+                b.append(a.pkg).append('\t').append(start).append('\t').append(fmt.format(Date(e.time))).append('\t')
+                    .append(if (e.picture) "picture" else "text").append('\t').append(e.text).append('\n')
+            }
+            b.append('\n')
         }
         return b.toString()
     }

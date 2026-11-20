@@ -53,6 +53,9 @@ class OcrMode(
     /** The model is on the phone. */
     @Volatile private var ready = false
     private var lastShot = 0L
+    /** The lines with Chinese of the last OCR read, as read (for the history). */
+    @Volatile var lastLines: List<String> = emptyList(); private set
+
     /** The app the last screenshot was read from (for the characters-seen history). */
     @Volatile var lastPkg: String? = null; private set
 
@@ -247,6 +250,7 @@ class OcrMode(
                     if (covered.contains(r.centerX().toInt(), r.centerY().toInt())) continue
                     out.add(OcrChar(r, cp))
                 }
+                lastLines = linesOf(text, dx, dy, covered)
                 bmp.recycle()
                 done(if (out.isEmpty()) "Reading: no Chinese characters in view" else "Reading: ${out.size} characters in view", out)
             }
@@ -279,7 +283,16 @@ class OcrMode(
      * Lens: every Chinese character in a still screenshot (screen coordinates, as the bitmap is the whole display).
      * [cb] gets them, or null and why not. The bitmap isn't recycled here.
      */
-    fun readShot(shot: Bitmap, cb: (List<OcrChar>?, String?) -> Unit) {
+    /** A read's lines with Chinese, spaces between characters removed, those under another window left out. */
+    private fun linesOf(text: com.google.mlkit.vision.text.Text, dx: Int, dy: Int, covered: Region?): List<String> =
+        text.textBlocks.flatMap { it.lines }.filter { line ->
+            val b = line.boundingBox
+            b == null || covered == null || !covered.contains(b.centerX() + dx, b.centerY() + dy)
+        }.map { it.text.replace(Regex("(?<=\\p{IsHan})\\s+(?=\\p{IsHan})"), "") }
+            .filter { t -> t.codePoints().anyMatch { Character.UnicodeScript.of(it) == Character.UnicodeScript.HAN } }
+
+    /** Lens: [cb] gets the characters, the lines with Chinese, or null and why not. */
+    fun readShot(shot: Bitmap, cb: (List<OcrChar>?, List<String>, String?) -> Unit) {
         withModel({
             recognizer.process(InputImage.fromBitmap(shot, 0))
                 .addOnSuccessListener(onWorker) { text ->
@@ -292,10 +305,10 @@ class OcrMode(
                         if (Character.UnicodeScript.of(cp) != Character.UnicodeScript.HAN) continue
                         out.add(OcrChar(RectF(b), cp))
                     }
-                    cb(out, null)
+                    cb(out, linesOf(text, 0, 0, null), null)
                 }
-                .addOnFailureListener(onWorker) { e -> cb(null, "Recognition failed: ${e.message ?: e.javaClass.simpleName}") }
-        }, { why -> cb(null, why) })
+                .addOnFailureListener(onWorker) { e -> cb(null, emptyList(), "Recognition failed: ${e.message ?: e.javaClass.simpleName}") }
+        }, { why -> cb(null, emptyList(), why) })
     }
 
     /** Lens: the text in one box of a still screenshot (spaces and line breaks removed), or null and why not. */

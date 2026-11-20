@@ -288,11 +288,11 @@ class XueService : AccessibilityService() {
         // Tap mode lets every touch through to Lens meanwhile.
         if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(true)
         val o = ocr ?: OcrMode(this, workerHandler) { chars -> main.post { setOcr(chars) } }.also { ocr = it }
-        o.readShot(shot) { chars, why ->
+        o.readShot(shot) { chars, lines, why ->
             main.post {
                 if (lens !== v) return@post
                 if (chars != null) {
-                    if (pkg != null) workerHandler.post { Stats.recordPicture(pkg, chars.map { it.cp }) }
+                    if (pkg != null) workerHandler.post { Stats.recordPicture(pkg, lines) }
                     val dark = Palette.isDark(this)
                     val extra = chars.map { toMark(it, dark) }.filter { o2 -> marks.none { overlaps(it, o2) } }
                     v.setMarks(marks + extra)
@@ -437,7 +437,8 @@ class XueService : AccessibilityService() {
         ocrMarks = chars.map { toMark(it, dark) }
         publish()
         // Into the history too (subtitles drawn into a video, text in images): under the app they were read from.
-        ocr?.lastPkg?.let { pkg -> workerHandler.post { Stats.recordPicture(pkg, chars.map { it.cp }) } }
+        val lines = ocr?.lastLines.orEmpty()
+        ocr?.lastPkg?.let { pkg -> workerHandler.post { Stats.recordPicture(pkg, lines) } }
     }
 
     private fun toMark(c: OcrChar, dark: Boolean): Mark {
@@ -562,6 +563,8 @@ class XueService : AccessibilityService() {
 
     private class Scan(val dark: Boolean, val covered: Region, val win: Rect) {
         val out = ArrayList<Mark>()
+        /** The text blocks that got marks, whole, for the history. */
+        val texts = ArrayList<String>()
         val seen = HashSet<Long>()
         var nodes = 0
         var blocks = 0
@@ -588,8 +591,7 @@ class XueService : AccessibilityService() {
                     all.addAll(s.out)
                     Stats.record(
                         root.packageName?.toString() ?: "?",
-                        s.blocks, s.withBoxes, SystemClock.uptimeMillis() - t0,
-                        s.out.map { it.cp },
+                        s.blocks, s.withBoxes, s.texts,
                     )
                 }
             }
@@ -675,6 +677,7 @@ class XueService : AccessibilityService() {
         node.getBoundsInScreen(nodeBox)
         if (!nodeBox.intersect(s.win)) return
 
+        val before = s.chars
         var k = 0
         while (k < boxes.size) {
             val idx = first + k
@@ -697,5 +700,7 @@ class XueService : AccessibilityService() {
                 high = Mine.highlight(cp, s.dark, byAge),
             ))
         }
+        // Some of it is on screen: the whole block goes into the history as one entry.
+        if (s.chars > before) s.texts.add(text)
     }
 }

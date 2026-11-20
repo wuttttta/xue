@@ -29,6 +29,8 @@ import android.widget.TextView
 class MainActivity : Activity() {
     companion object {
         private const val EXPORT = 2
+        /** Groups shown per app in settings (the export has all). */
+        private const val SHOWN_GROUPS = 60
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -266,7 +268,7 @@ class MainActivity : Activity() {
         col.addView(button("Update from varie.lol/h") { update() })
 
         col.addView(heading("Apps seen (character boxes)"))
-        col.addView(text("Tap an app to see the characters 学 has marked in it.", 13f, muted()))
+        col.addView(text("Tap an app to see what 学 has read in it.", 13f, muted()))
         apps = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(apps)
         col.addView(LinearLayout(this).apply {
@@ -278,7 +280,9 @@ class MainActivity : Activity() {
             }.apply { (layoutParams as LinearLayout.LayoutParams).leftMargin = (8 * dp).toInt() })
         })
         col.addView(text(
-            "Export saves the whole history as a table (app, character, first seen, text or picture) where you choose.",
+            "The history keeps what was on screen together: each text, line or subtitle as seen, grouped by when " +
+                "(a pause of over 2 minutes starts a new group). Export saves it all as a table (app, group, time, " +
+                "text or picture, text) where you choose.",
             13f, muted(),
         ))
 
@@ -326,7 +330,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
         if (requestCode != EXPORT || resultCode != RESULT_OK || uri == null) return
-        val text = Stats.text()
+        val text = Stats.export()
         Thread {
             val ok = runCatching {
                 contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
@@ -438,8 +442,8 @@ class MainActivity : Activity() {
             }
             apps.addView(text(
                 (if (open) "▾ " else "▸ ") + a.pkg + "\n   " + verdict + ": " + a.withBoxes + "/" + a.blocks +
-                    " text blocks · " + a.seen.size + " different characters" +
-                    a.seen.values.count { it.picture }.let { if (it > 0) " ($it from pictures)" else "" } + " · " + ago, 14f,
+                    " text blocks · " + a.entries.size + " lines in " + a.groups().size + " groups, " +
+                    a.distinct() + " different characters · " + ago, 14f,
             ).apply {
                 setPadding(0, (10 * dp).toInt(), 0, (6 * dp).toInt())
                 setOnClickListener {
@@ -447,42 +451,65 @@ class MainActivity : Activity() {
                     renderApps(true)
                 }
             })
-            if (open) apps.addView(charsView(a))
+            if (open) apps.addView(historyView(a))
         }
     }
 
     /**
-     * An app's characters in the order first seen; yours on their highlight, as on screen. Those seen only in
-     * pictures (OCR, Lens) are blue.
+     * An app's history: the groups (what was on screen together), newest first, each under its date and time, with
+     * its text as it was seen, one entry a line. Your characters are on their highlight, as on screen; entries read
+     * from pictures (OCR, Lens) are blue. The latest [SHOWN_GROUPS] groups here; the export has them all.
      */
-    private fun charsView(a: Stats.App): TextView {
-        val sb = android.text.SpannableStringBuilder()
-        for ((cp, seen) in a.seen) {
-            val start = sb.length
-            sb.append(String(Character.toChars(cp)))
-            val c = Mine.highlight(cp, dark, Prefs.get(this).getBoolean(Prefs.BY_AGE, false))
-            if (c != null) {
-                sb.setSpan(
-                    android.text.style.BackgroundColorSpan(Color.argb(110, Color.red(c), Color.green(c), Color.blue(c))),
-                    start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                )
-            }
-            if (seen.picture) {
-                sb.setSpan(
-                    android.text.style.ForegroundColorSpan(Palette.freq(3, dark)),
-                    start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                )
-            }
-            sb.append(' ')
-        }
-        return TextView(this).apply {
-            text = sb
-            textSize = 22f
-            setTextColor(fg())
-            setLineSpacing(4 * dp, 1f)
-            setTextIsSelectable(true)
+    private fun historyView(a: Stats.App): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding((14 * dp).toInt(), 0, 0, (10 * dp).toInt())
         }
+        val byAge = Prefs.get(this).getBoolean(Prefs.BY_AGE, false)
+        val when_ = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.getDefault())
+        val groups = a.groups().asReversed()
+        for (g in groups.take(SHOWN_GROUPS)) {
+            box.addView(text(when_.format(java.util.Date(g.first().time)), 12f, muted()).apply {
+                setPadding(0, (8 * dp).toInt(), 0, 0)
+            })
+            val sb = android.text.SpannableStringBuilder()
+            for (e in g) {
+                val lineStart = sb.length
+                var i = 0
+                while (i < e.text.length) {
+                    val cp = e.text.codePointAt(i)
+                    val start = sb.length
+                    sb.append(String(Character.toChars(cp)))
+                    if (Stats.isHan(cp)) {
+                        Mine.highlight(cp, dark, byAge)?.let { c ->
+                            sb.setSpan(
+                                android.text.style.BackgroundColorSpan(Color.argb(110, Color.red(c), Color.green(c), Color.blue(c))),
+                                start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                            )
+                        }
+                    }
+                    i += Character.charCount(cp)
+                }
+                if (e.picture) {
+                    sb.setSpan(
+                        android.text.style.ForegroundColorSpan(Palette.freq(3, dark)),
+                        lineStart, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                }
+                sb.append('\n')
+            }
+            box.addView(TextView(this).apply {
+                text = sb.trimEnd()
+                textSize = 18f
+                setTextColor(fg())
+                setLineSpacing(3 * dp, 1f)
+                setTextIsSelectable(true)
+            })
+        }
+        if (groups.size > SHOWN_GROUPS) {
+            box.addView(text("${groups.size - SHOWN_GROUPS} older groups: in the export.", 12f, muted()))
+        }
+        return box
     }
 
     private fun saveCode() {
