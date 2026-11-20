@@ -108,6 +108,7 @@ class XueService : AccessibilityService() {
         workerHandler.post {
             if (!Freq.loaded) Freq.load(this)
             Mine.load(this)
+            Stats.load(this)
         }
         workerHandler.post(syncMine)
         workerHandler.postDelayed(heartbeat, 1000)
@@ -216,9 +217,17 @@ class XueService : AccessibilityService() {
         }, 450)
     }
 
+    /** The app in front (the top application window that isn't 学), for the history. */
+    fun topApp(): String? = runCatching {
+        windows.sortedByDescending { it.layer }
+            .firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName != packageName }
+            ?.root?.packageName?.toString()
+    }.getOrNull()
+
     @android.annotation.TargetApi(30)
     private fun shootLens() {
         val marks = textMarks
+        val pkg = topApp()
         fun restore() {
             layer?.visibility = View.VISIBLE
             button?.visibility = if (prefs.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
@@ -233,7 +242,7 @@ class XueService : AccessibilityService() {
                     r.hardwareBuffer.close()
                     soft
                 }.getOrNull()
-                if (shot == null) toast("Lens couldn't read the screen") else showLens(shot, marks)
+                if (shot == null) toast("Lens couldn't read the screen") else showLens(shot, marks, pkg)
             }
 
             override fun onFailure(code: Int) {
@@ -252,7 +261,7 @@ class XueService : AccessibilityService() {
     }
 
     @android.annotation.TargetApi(30)
-    private fun showLens(shot: android.graphics.Bitmap, marks: List<Mark>) {
+    private fun showLens(shot: android.graphics.Bitmap, marks: List<Mark>, pkg: String?) {
         val w = wm ?: return
         val v = LensView(
             this, shot,
@@ -283,6 +292,7 @@ class XueService : AccessibilityService() {
             main.post {
                 if (lens !== v) return@post
                 if (chars != null) {
+                    if (pkg != null) workerHandler.post { Stats.recordPicture(pkg, chars.map { it.cp }) }
                     val dark = Palette.isDark(this)
                     val extra = chars.map { toMark(it, dark) }.filter { o2 -> marks.none { overlaps(it, o2) } }
                     v.setMarks(marks + extra)
@@ -426,6 +436,8 @@ class XueService : AccessibilityService() {
         val dark = Palette.isDark(this)
         ocrMarks = chars.map { toMark(it, dark) }
         publish()
+        // Into the history too (subtitles drawn into a video, text in images): under the app they were read from.
+        ocr?.lastPkg?.let { pkg -> workerHandler.post { Stats.recordPicture(pkg, chars.map { it.cp }) } }
     }
 
     private fun toMark(c: OcrChar, dark: Boolean): Mark {
@@ -576,7 +588,7 @@ class XueService : AccessibilityService() {
                     all.addAll(s.out)
                     Stats.record(
                         root.packageName?.toString() ?: "?",
-                        s.blocks, s.withBoxes, s.chars, SystemClock.uptimeMillis() - t0,
+                        s.blocks, s.withBoxes, SystemClock.uptimeMillis() - t0,
                         s.out.map { it.cp },
                     )
                 }
@@ -626,6 +638,7 @@ class XueService : AccessibilityService() {
         override fun run() {
             val pm = getSystemService(android.os.PowerManager::class.java)
             if ((show || looking || tapOn) && pm?.isInteractive != false) requestScan()
+            Stats.saveSoon(this@XueService)
             workerHandler.postDelayed(this, 1000)
         }
     }

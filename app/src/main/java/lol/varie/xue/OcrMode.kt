@@ -53,6 +53,9 @@ class OcrMode(
     /** The model is on the phone. */
     @Volatile private var ready = false
     private var lastShot = 0L
+    /** The app the last screenshot was read from (for the characters-seen history). */
+    @Volatile var lastPkg: String? = null; private set
+
     /** What it is doing, for the settings screen. */
     @Volatile var status = ""; private set
 
@@ -169,6 +172,7 @@ class OcrMode(
                         return
                     }
                     windowId = w.id
+                    lastPkg = w.root?.packageName?.toString()
                     offsetX = b.left
                     offsetY = b.top
                     break
@@ -179,6 +183,8 @@ class OcrMode(
                 kick(EVERY_MS)
                 return
             }
+        } else {
+            lastPkg = service.topApp()
         }
         busy = true
         lastShot = SystemClock.uptimeMillis()

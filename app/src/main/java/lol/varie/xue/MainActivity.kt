@@ -27,6 +27,10 @@ import android.widget.TextView
 
 /** Settings: turn the service on, marks on/off, the ƒ legend, data refresh, and which apps give boxes. */
 class MainActivity : Activity() {
+    companion object {
+        private const val EXPORT = 2
+    }
+
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
     private lateinit var enable: Button
@@ -265,7 +269,18 @@ class MainActivity : Activity() {
         col.addView(text("Tap an app to see the characters 学 has marked in it.", 13f, muted()))
         apps = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(apps)
-        col.addView(button("Clear") { Stats.clear(); expanded.clear(); refresh() })
+        col.addView(LinearLayout(this).apply {
+            addView(button("Export") { exportHistory() })
+            addView(button("Clear") {
+                Stats.clear(applicationContext)
+                expanded.clear()
+                renderApps(true)
+            }.apply { (layoutParams as LinearLayout.LayoutParams).leftMargin = (8 * dp).toInt() })
+        })
+        col.addView(text(
+            "Export saves the whole history as a table (app, character, first seen, text or picture) where you choose.",
+            13f, muted(),
+        ))
 
         col.addView(text(
             "Frequencies: jieba's dict.txt (MIT), via varie.lol/h. Nothing you read leaves the phone.", 12f, muted()
@@ -286,7 +301,41 @@ class MainActivity : Activity() {
         Thread {
             if (!Freq.loaded) Freq.load(applicationContext)
             Mine.load(applicationContext)
-            ui.post { refresh() }
+            Stats.load(applicationContext)
+            ui.post { refresh(); renderApps(true) }
+        }.start()
+    }
+
+    /** Export: the system's "save as" picker, then the history written to the file chosen. */
+    private fun exportHistory() {
+        Stats.saveSoon(applicationContext)
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())
+        @Suppress("DEPRECATION")
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("text/tab-separated-values")
+                .putExtra(Intent.EXTRA_TITLE, "xue-seen-$day.tsv"),
+            EXPORT,
+        )
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode != EXPORT || resultCode != RESULT_OK || uri == null) return
+        val text = Stats.text()
+        Thread {
+            val ok = runCatching {
+                contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            }.isSuccess
+            ui.post {
+                android.widget.Toast.makeText(
+                    this, if (ok) "History exported" else "Couldn't write the file", android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
         }.start()
     }
 
@@ -389,7 +438,8 @@ class MainActivity : Activity() {
             }
             apps.addView(text(
                 (if (open) "▾ " else "▸ ") + a.pkg + "\n   " + verdict + ": " + a.withBoxes + "/" + a.blocks +
-                    " text blocks, " + a.seen.size + " different characters · " + ago, 14f,
+                    " text blocks · " + a.seen.size + " different characters" +
+                    a.seen.values.count { it.picture }.let { if (it > 0) " ($it from pictures)" else "" } + " · " + ago, 14f,
             ).apply {
                 setPadding(0, (10 * dp).toInt(), 0, (6 * dp).toInt())
                 setOnClickListener {
@@ -401,16 +451,25 @@ class MainActivity : Activity() {
         }
     }
 
-    /** An app's characters in the order first seen; yours on their level's highlight, as on screen. */
+    /**
+     * An app's characters in the order first seen; yours on their highlight, as on screen. Those seen only in
+     * pictures (OCR, Lens) are blue.
+     */
     private fun charsView(a: Stats.App): TextView {
         val sb = android.text.SpannableStringBuilder()
-        for (cp in a.seen) {
+        for ((cp, seen) in a.seen) {
             val start = sb.length
             sb.append(String(Character.toChars(cp)))
             val c = Mine.highlight(cp, dark, Prefs.get(this).getBoolean(Prefs.BY_AGE, false))
             if (c != null) {
                 sb.setSpan(
                     android.text.style.BackgroundColorSpan(Color.argb(110, Color.red(c), Color.green(c), Color.blue(c))),
+                    start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+            if (seen.picture) {
+                sb.setSpan(
+                    android.text.style.ForegroundColorSpan(Palette.freq(3, dark)),
                     start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
                 )
             }
