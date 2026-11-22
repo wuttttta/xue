@@ -43,6 +43,17 @@ class PanelActivity : Activity() {
         /** The sheet's height as a share of the screen: the range the handle can drag it in. */
         const val MIN_SHARE = 0.3f
         const val MAX_SHARE = 0.95f
+
+        /**
+         * Every opening starts clean: the quiz keeps its last mode in its settings (h.settings.v1 "explore"), so after
+         * a sentence (Quiz 句 sets "sent") a character would open in sentence mode too. This puts back the mode last
+         * used for characters (random, shaped…, kept as xue.explore) and says "reset" when it had to.
+         */
+        const val UNSENT = "(function(){try{var k='h.settings.v1',s=JSON.parse(localStorage.getItem(k)||'{}')||{};" +
+            "if(s.explore==='sent'){var b=localStorage.getItem('xue.explore');if(b)s.explore=b;else delete s.explore;" +
+            "localStorage.setItem(k,JSON.stringify(s));return 'reset';}" +
+            "if(s.explore)localStorage.setItem('xue.explore',s.explore);else localStorage.removeItem('xue.explore');" +
+            "return 'ok';}catch(e){return 'ok';}})()"
     }
 
     private lateinit var web: WebView
@@ -136,7 +147,7 @@ class PanelActivity : Activity() {
                     // bottom bars can come out a pixel wider than a narrow screen (the quiz's buttons don't shrink).
                     "(function(){var s=document.createElement('style');s.textContent='html,#exportp,#editp,#statp," +
                         "#pickp,#optp,#ocrp,#svp,#snp,#sqp,#bkp,#chp,#wmp{overflow-x:hidden}';" +
-                        "document.documentElement.appendChild(s);})();",
+                        "document.documentElement.appendChild(s);})();" + UNSENT + ";",
                     setOf("https://varie.lol"),
                 )
             }
@@ -205,11 +216,20 @@ class PanelActivity : Activity() {
             fresh("#" + Uri.encode(ch))
             return
         }
-        if (loaded) {
-            focus(ch)
-        } else {
+        if (!loaded) {
             pending = { focus(ch) }
             fresh()
+            return
+        }
+        // The page is open: if a sentence left it in sentence mode, reset that and load it again (the reset also
+        // runs at the start of every load); else just move it to the character.
+        web.evaluateJavascript(UNSENT) { r ->
+            if (r?.contains("reset") == true) {
+                pending = { focus(ch) }
+                fresh()
+            } else {
+                focus(ch)
+            }
         }
     }
 
