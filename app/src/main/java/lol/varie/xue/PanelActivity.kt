@@ -96,6 +96,11 @@ class PanelActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            // Lay the page out as Chrome does (its viewport tag: the screen's width), and never sideways-scrollable:
+            // a page a pixel wider than the sheet made it slide left and right.
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            isHorizontalScrollBarEnabled = false
             webViewClient = object : WebViewClient() {
                 // The quiz stays in the sheet; any other link opens in the browser.
                 override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
@@ -123,6 +128,16 @@ class PanelActivity : Activity() {
             })
         }
         sheet.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            runCatching {
+                WebViewCompat.addDocumentStartJavaScript(
+                    web,
+                    "(function(){var s=document.createElement('style');s.textContent='html{overflow-x:hidden}';" +
+                        "document.documentElement.appendChild(s);})();",
+                    setOf("https://varie.lol"),
+                )
+            }
+        }
 
         val share = Prefs.get(this).getFloat(Prefs.PANEL_HEIGHT, 0.72f).coerceIn(MIN_SHARE, MAX_SHARE)
         val h = (resources.displayMetrics.heightPixels * share).toInt()
