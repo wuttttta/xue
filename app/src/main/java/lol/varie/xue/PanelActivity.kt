@@ -132,7 +132,10 @@ class PanelActivity : Activity() {
             runCatching {
                 WebViewCompat.addDocumentStartJavaScript(
                     web,
-                    "(function(){var s=document.createElement('style');s.textContent='html{overflow-x:hidden}';" +
+                    // The page and its full-screen layers (word picker, editors, stats…: each scrolls on its own), whose
+                    // bottom bars can come out a pixel wider than a narrow screen (the quiz's buttons don't shrink).
+                    "(function(){var s=document.createElement('style');s.textContent='html,#exportp,#editp,#statp," +
+                        "#pickp,#optp,#ocrp,#svp,#snp,#sqp,#bkp,#chp,#wmp{overflow-x:hidden}';" +
                         "document.documentElement.appendChild(s);})();",
                     setOf("https://varie.lol"),
                 )
