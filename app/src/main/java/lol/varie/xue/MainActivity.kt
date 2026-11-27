@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private lateinit var mine: TextView
     private lateinit var codeIn: EditText
     private var tapStatus: TextView? = null
+    private lateinit var problems: LinearLayout
+    private lateinit var problemText: TextView
     private var ocrStatus: TextView? = null
     private lateinit var panelLine: TextView
     /** Sign-in in progress or its error; null shows the saved state. */
@@ -209,6 +211,25 @@ class MainActivity : Activity() {
             setPadding(0, (8 * dp).toInt(), 0, (4 * dp).toInt())
             setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(Prefs.BUTTON, on).apply() }
         })
+
+        // Problems: shown only when something went wrong (a crash, or a part switched off).
+        problems = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        problems.addView(heading("Problems"))
+        problemText = text("", 13f).apply { setTextIsSelectable(true) }
+        problems.addView(problemText)
+        problems.addView(LinearLayout(this).apply {
+            addView(button("Copy") {
+                val all = CrashLog.read(this@MainActivity).orEmpty()
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("学 problems", all))
+                android.widget.Toast.makeText(this@MainActivity, "Copied: paste it to Claude", android.widget.Toast.LENGTH_SHORT).show()
+            })
+            addView(button("Clear") {
+                CrashLog.clear(this@MainActivity)
+                refresh()
+            }.apply { (layoutParams as LinearLayout.LayoutParams).leftMargin = (8 * dp).toInt() })
+        })
+        col.addView(problems)
 
         col.addView(heading("Your list"))
         codeIn = EditText(this).apply {
@@ -387,6 +408,14 @@ class MainActivity : Activity() {
                 !on -> "OCR starts when the service is on."
                 else -> XueService.running?.ocrStatus?.takeIf { it.isNotEmpty() }?.let { "● $it" } ?: "Starting…"
             }
+        }
+
+        val log = CrashLog.read(this)
+        problems.visibility = if (log == null) View.GONE else View.VISIBLE
+        if (log != null) {
+            val entries = log.split("\n\n").filter { it.isNotBlank() }
+            problemText.text = entries.first().lines().take(4).joinToString("\n") +
+                if (entries.size > 1) "\n(+${entries.size - 1} earlier)" else ""
         }
 
         val pc = PanelSignIn.code(this)

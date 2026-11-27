@@ -81,8 +81,14 @@ class XueService : AccessibilityService() {
             Prefs.BUTTON -> main.post {
                 button?.visibility = if (p.getBoolean(Prefs.BUTTON, false)) View.VISIBLE else View.GONE
             }
-            Prefs.TAP -> main.post { applyTapMode(); StatusNote.show(this) }
-            Prefs.OCR -> main.post { applyOcr(); StatusNote.show(this) }
+            Prefs.TAP -> main.post {
+                part("tap mode", Prefs.TAP) { applyTapMode() }
+                part("the notification") { StatusNote.show(this) }
+            }
+            Prefs.OCR -> main.post {
+                part("OCR mode", Prefs.OCR) { applyOcr() }
+                part("the notification") { StatusNote.show(this) }
+            }
             Prefs.QUIZ -> main.post { StatusNote.show(this) }
             Prefs.BY_AGE -> {
                 byAge = p.getBoolean(Prefs.BY_AGE, false)
@@ -99,20 +105,32 @@ class XueService : AccessibilityService() {
         show = prefs.getBoolean(Prefs.SHOW, true)
         byAge = prefs.getBoolean(Prefs.BY_AGE, false)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
-        addLayer()
-        addButton()
+        // Each part starts on its own: if one fails it is logged (settings, Problems) and, for a mode, switched
+        // off, and the marks keep working instead of the whole service crashing ("Not working").
+        part("the marks layer") { addLayer() }
+        part("the floating button") { addButton() }
         layer?.drawMarks = show
-        applyTapMode()
-        applyOcr()
-        StatusNote.show(this)
+        part("tap mode", Prefs.TAP) { applyTapMode() }
+        part("OCR mode", Prefs.OCR) { applyOcr() }
+        part("the notification") { StatusNote.show(this) }
         workerHandler.post {
-            if (!Freq.loaded) Freq.load(this)
-            Mine.load(this)
-            Stats.load(this)
+            part("the frequency list") { if (!Freq.loaded) Freq.load(this) }
+            part("your list") { Mine.load(this) }
+            part("the history") { Stats.load(this) }
         }
         workerHandler.post(syncMine)
         workerHandler.postDelayed(heartbeat, 1000)
         requestScan()
+    }
+
+    /** Runs one part of 学; on failure logs it and, if it is a mode ([pref]), switches that mode off. */
+    private fun part(what: String, pref: String? = null, run: () -> Unit) {
+        try {
+            run()
+        } catch (t: Throwable) {
+            CrashLog.note(this, "$what failed" + if (pref != null) " and was switched off" else "", t)
+            if (pref != null) prefs.edit().putBoolean(pref, false).apply()
+        }
     }
 
     private fun addLayer() {
@@ -200,12 +218,14 @@ class XueService : AccessibilityService() {
      * screenshot covers the screen with every character in it marked (the app's text now, and OCR of the picture),
      * and taps or drags go to it alone. Closed with × or Back; hidden while a card or sentence it opened is up.
      */
-    fun startLens() = main.post {
-        if (lens != null) return@post
+    fun startLens() = main.post { part("Lens") { startLensNow() } }
+
+    private fun startLensNow() {
+        if (lens != null) return
         dailySync()
         if (Build.VERSION.SDK_INT < 30) {
             toast("Lens needs Android 11 or newer")
-            return@post
+            return
         }
         setLooking(false)
         if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
@@ -509,9 +529,11 @@ class XueService : AccessibilityService() {
 
     /** Your list and results: fetched on the first use of the day (the saved copy is used the rest of the day). */
     private val syncMine = Runnable {
-        if (Mine.code(this@XueService) != null && Mine.stale(this@XueService)) {
-            Mine.sync(this@XueService)
-            requestScan()
+        part("syncing your list") {
+            if (Mine.code(this@XueService) != null && Mine.stale(this@XueService)) {
+                Mine.sync(this@XueService)
+                requestScan()
+            }
         }
     }
 
@@ -551,7 +573,7 @@ class XueService : AccessibilityService() {
         if (!Freq.loaded) Freq.load(this)
         val marks = try {
             collect()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // Nodes can vanish mid-scan; the next event brings a new one.
             return
         }
@@ -639,8 +661,10 @@ class XueService : AccessibilityService() {
     private val heartbeat = object : Runnable {
         override fun run() {
             val pm = getSystemService(android.os.PowerManager::class.java)
-            if ((show || looking || tapOn) && pm?.isInteractive != false) requestScan()
-            Stats.saveSoon(this@XueService)
+            part("the 1 s check") {
+                if ((show || looking || tapOn) && pm?.isInteractive != false) requestScan()
+                Stats.saveSoon(this@XueService)
+            }
             workerHandler.postDelayed(this, 1000)
         }
     }
