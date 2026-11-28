@@ -110,8 +110,11 @@ object Mine {
         return Palette.age(if (days < 1) 0 else if (days < 3) 1 else if (days < 7) 2 else if (days < 30) 3 else 4)
     }
 
-    /** Downloads list and results. Blocking: call off the main thread. Returns null or a short error. */
-    @Synchronized
+    /**
+     * Downloads list and results. Blocking: call off the main thread. Returns null or a short error.
+     * The download itself holds no lock (a slow network must not block load() or anything else waiting on Mine);
+     * only saving and reading the new copy do.
+     */
     fun sync(context: Context): String? {
         val code = code(context)
         if (code == null) {
@@ -122,12 +125,14 @@ object Mine {
             val list = get("$PASTE/$code.txt") ?: throw Problem("list $code not found")
             val sc = list.lineSequence().mapNotNull { STATS_HEADER.find(it.trim())?.groupValues?.get(1) }.firstOrNull()
             val stats = if (sc != null) get("$PASTE/$sc.txt") else null
-            File(context.filesDir, LIST_FILE).writeText(list)
-            val sf = File(context.filesDir, STATS_FILE)
-            if (stats != null) sf.writeText(stats) else sf.delete()
-            syncedAt = System.currentTimeMillis()
-            Prefs.get(context).edit().putLong(Prefs.SYNCED_AT, syncedAt).apply()
-            parse(list, stats)
+            synchronized(this) {
+                File(context.filesDir, LIST_FILE).writeText(list)
+                val sf = File(context.filesDir, STATS_FILE)
+                if (stats != null) sf.writeText(stats) else sf.delete()
+                syncedAt = System.currentTimeMillis()
+                Prefs.get(context).edit().putLong(Prefs.SYNCED_AT, syncedAt).apply()
+                parse(list, stats)
+            }
             null
         } catch (e: Problem) {
             e.message

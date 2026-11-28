@@ -40,8 +40,15 @@ class XueService : AccessibilityService() {
     }
 
     private val main = Handler(Looper.getMainLooper())
-    private val worker = HandlerThread("xue-scan").apply { start() }
-    private val workerHandler = Handler(worker.looper)
+    /** Finding characters (and OCR's callbacks). Replaced by the watchdog if it ever gets stuck. */
+    private var worker = HandlerThread("xue-scan").apply { start() }
+    @Volatile private var workerHandler = Handler(worker.looper)
+    /** Network (your list and results), apart, so a slow connection never holds up the marks. */
+    private val net = HandlerThread("xue-net").apply { start() }
+    private val netHandler = Handler(net.looper)
+    @Volatile private var scannedAt = SystemClock.uptimeMillis()
+    @Volatile private var mainAt = SystemClock.uptimeMillis()
+    private var watchdog: Thread? = null
 
     private var wm: WindowManager? = null
     private var layer: MarkLayer? = null
@@ -94,7 +101,7 @@ class XueService : AccessibilityService() {
                 byAge = p.getBoolean(Prefs.BY_AGE, false)
                 requestScan()
             }
-            Prefs.LIST_CODE -> workerHandler.post { Mine.sync(this); requestScan() }
+            Prefs.LIST_CODE -> netHandler.post { Mine.sync(this); requestScan() }
         }
     }
 
@@ -118,8 +125,72 @@ class XueService : AccessibilityService() {
             part("your list") { Mine.load(this) }
             part("the history") { Stats.load(this) }
         }
-        workerHandler.post(syncMine)
+        netHandler.post(syncMine)
         workerHandler.postDelayed(heartbeat, 1000)
+        startWatchdog()
+        requestScan()
+    }
+
+    /**
+     * Every 5 s, from a thread of its own: are characters still being found, and does the main thread still answer?
+     * Stuck for over 20 s (15 s for the main thread): where it is stuck goes to Problems, and a stuck finder is
+     * replaced by a new one.
+     */
+    private fun startWatchdog() {
+        watchdog = Thread({
+            var workerReported = false
+            var mainReported = false
+            while (running === this) {
+                try {
+                    Thread.sleep(5000)
+                } catch (e: InterruptedException) {
+                    break
+                }
+                val now = SystemClock.uptimeMillis()
+                main.post { mainAt = SystemClock.uptimeMillis() }
+                val pm = getSystemService(android.os.PowerManager::class.java)
+                val needed = (show || looking || tapOn) && pm?.isInteractive != false
+                if (needed && now - scannedAt > 20_000) {
+                    if (!workerReported) {
+                        workerReported = true
+                        CrashLog.note(this, "Finding characters was stuck for ${(now - scannedAt) / 1000} s; restarted it", stuck(worker))
+                    }
+                    scannedAt = now
+                    main.post { part("restarting the finder") { restartWorker() } }
+                } else if (now - scannedAt <= 20_000) {
+                    workerReported = false
+                }
+                if (now - mainAt > 15_000) {
+                    if (!mainReported) {
+                        mainReported = true
+                        CrashLog.note(this, "学's main thread was stuck for ${(now - mainAt) / 1000} s", stuck(Looper.getMainLooper().thread))
+                    }
+                } else {
+                    mainReported = false
+                }
+            }
+        }, "xue-watchdog").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** A thread's current stack, as an error to log. */
+    private fun stuck(t: Thread) = Throwable("where ${t.name} was").apply { stackTrace = t.stackTrace }
+
+    private fun restartWorker() {
+        val old = worker
+        worker = HandlerThread("xue-scan").apply { start() }
+        workerHandler = Handler(worker.looper)
+        old.quit()
+        scanQueued = false
+        workerHandler.postDelayed(heartbeat, 1000)
+        // OCR answers on the finder's thread: start it again on the new one.
+        if (ocr != null) {
+            ocr?.close()
+            ocr = null
+            part("OCR mode", Prefs.OCR) { applyOcr() }
+        }
         requestScan()
     }
 
@@ -524,6 +595,8 @@ class XueService : AccessibilityService() {
         layer = null
         button = null
         worker.quitSafely()
+        net.quitSafely()
+        watchdog?.interrupt()
         super.onDestroy()
     }
 
@@ -539,13 +612,13 @@ class XueService : AccessibilityService() {
 
     /** Opened something of 学's (the panel, Lens): a new day means a fresh copy first. */
     fun dailySync() {
-        workerHandler.post(syncMine)
+        netHandler.post(syncMine)
     }
 
     /** After the panel closes: the list may have new words, the results new answers (the quiz sends those ~25 s later). */
     fun syncSoon() {
         for (delay in longArrayOf(3000, 35000)) {
-            workerHandler.postDelayed({
+            netHandler.postDelayed({
                 if (Mine.code(this) != null) {
                     Mine.sync(this)
                     requestScan()
@@ -568,6 +641,7 @@ class XueService : AccessibilityService() {
     private fun scan() {
         scanQueued = false
         lastScan = SystemClock.uptimeMillis()
+        scannedAt = lastScan
         // With marks off they are still found (not drawn) for tap mode, and drawn while look mode lasts.
         if (!show && !looking && !tapOn) return
         if (!Freq.loaded) Freq.load(this)
@@ -660,6 +734,8 @@ class XueService : AccessibilityService() {
     /** A rescan every second while the screen is on, for apps that move their content without telling Android. */
     private val heartbeat = object : Runnable {
         override fun run() {
+            // A finder replaced by the watchdog: its old thread (once unstuck) stops here.
+            if (Looper.myLooper() != workerHandler.looper) return
             val pm = getSystemService(android.os.PowerManager::class.java)
             part("the 1 s check") {
                 if ((show || looking || tapOn) && pm?.isInteractive != false) requestScan()
