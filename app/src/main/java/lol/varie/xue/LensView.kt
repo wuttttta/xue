@@ -65,6 +65,7 @@ class LensView(
     fun current(): List<Mark> = marks
 
     override fun onDraw(canvas: Canvas) {
+        if (shot.isRecycled) return
         getLocationOnScreen(loc)
         canvas.save()
         canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())

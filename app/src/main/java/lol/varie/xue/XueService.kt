@@ -404,7 +404,7 @@ class XueService : AccessibilityService() {
             runCatching { wm?.addView(v, lp) }
             v.requestFocus()
         } else if (!on && attached) {
-            runCatching { wm?.removeView(v) }
+            runCatching { wm?.removeViewImmediate(v) }
         }
     }
 
@@ -412,7 +412,8 @@ class XueService : AccessibilityService() {
         lensShown(false)
         lens = null
         lensParams = null
-        lensShot?.recycle()
+        // Not recycled: the window may still draw one more frame with it (that crashed the service in 0.1.25–0.1.38),
+        // and OCR may still be reading it. Dropping the reference lets the garbage collector free it safely.
         lensShot = null
         if (Build.VERSION.SDK_INT >= 33) tap?.setLooking(looking)
     }
